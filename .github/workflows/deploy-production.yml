@@ -14,8 +14,42 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Validate PROD secrets
+        run: |
+          set -e
+          missing=0
+          [ -z "${{ secrets.PROD_HOST }}" ] && echo "Missing PROD_HOST" && missing=1 || true
+          [ -z "${{ secrets.PROD_USER }}" ] && echo "Missing PROD_USER" && missing=1 || true
+          [ -z "${{ secrets.PROD_SSH_PRIVATE_KEY }}" ] && echo "Missing PROD_SSH_PRIVATE_KEY" && missing=1 || true
+          [ -z "${{ secrets.PROD_SSH_PORT }}" ] && echo "Missing PROD_SSH_PORT" && missing=1 || true
+          [ "$missing" -ne 0 ] && exit 1
+          echo "PROD secrets OK"
+
+      - uses: actions/checkout@v4
+
+      - name: Pack sources
+        run: |
+          tar -czf /tmp/awardsferm-deploy.tar.gz \
+            --exclude='.git' \
+            --exclude='**/bin' \
+            --exclude='**/obj' \
+            --exclude='**/node_modules' \
+            --exclude='profiles/*/browser-data' \
+            .
+
+      - name: Upload archive
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PROD_SSH_PORT }}
+          source: /tmp/awardsferm-deploy.tar.gz
+          target: /tmp
+          overwrite: true
+
       - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.PROD_HOST }}
           username: ${{ secrets.PROD_USER }}
@@ -27,38 +61,14 @@ jobs:
           script: |
             set -eo pipefail
 
-            REPO_SSH_URL="git@github.com:${{ github.repository }}.git"
-            REPO_NAME="${{ github.event.repository.name }}"
-            BRANCH="main"
-
-            DEPLOY_PATH="${{ secrets.PROD_DEPLOY_PATH }}"
-            if [ -z "$DEPLOY_PATH" ]; then DEPLOY_PATH="/opt/$REPO_NAME"; fi
+            DEPLOY_PATH='${{ secrets.PROD_DEPLOY_PATH }}'
+            if [ -z "$DEPLOY_PATH" ]; then DEPLOY_PATH="/opt/awardsferm"; fi
 
             echo "==> Deploy path: $DEPLOY_PATH"
-
-            mkdir -p "$DEPLOY_PATH" || { echo "ERROR: mkdir failed"; exit 1; }
-            cd "$DEPLOY_PATH" || { echo "ERROR: cd failed"; exit 1; }
-
-            if [ ! -d .git ]; then
-              git init
-              git remote add origin "$REPO_SSH_URL"
-            else
-              git remote set-url origin "$REPO_SSH_URL"
-            fi
-
-            mkdir -p ~/.ssh
-            chmod 700 ~/.ssh
-            ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null || true
-
-            if ! git fetch --prune origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"; then
-              echo "ERROR: git fetch failed"
-              exit 1
-            fi
-
-            if ! git checkout -f -B "$BRANCH" "origin/$BRANCH"; then
-              echo "ERROR: git checkout failed"
-              exit 1
-            fi
+            mkdir -p "$DEPLOY_PATH/profiles"
+            tar -xzf /tmp/awardsferm-deploy.tar.gz -C "$DEPLOY_PATH"
+            rm -f /tmp/awardsferm-deploy.tar.gz
+            cd "$DEPLOY_PATH"
 
             echo "==> Write .env.production"
             umask 077
@@ -67,8 +77,12 @@ jobs:
             API_PORT='${{ secrets.PROD_API_PORT }}'
             if [ -z "$API_PORT" ]; then API_PORT=55503; fi
             JWT_SECRET='${{ secrets.JWT_SECRET }}'
+            if [ -z "$JWT_SECRET" ] && [ -f .env.production ]; then
+              JWT_SECRET=$(grep '^JWT_SECRET=' .env.production | cut -d= -f2- || true)
+            fi
             if [ -z "$JWT_SECRET" ]; then JWT_SECRET=$(openssl rand -base64 48); fi
             {
+              echo "DEPLOY_PATH=$DEPLOY_PATH"
               echo "FRONTEND_PORT=$FE_PORT"
               echo "API_PORT=$API_PORT"
               echo "JWT_SECRET=$JWT_SECRET"
@@ -77,9 +91,7 @@ jobs:
                 echo "RSYA_OAUTH_TOKEN=${{ secrets.RSYA_OAUTH_TOKEN }}"
               fi
             } > .env.production
-
-            mkdir -p "$DEPLOY_PATH/profiles"
-            sudo mkdir -p /var/lib/awardsferm 2>/dev/null || mkdir -p /var/lib/awardsferm
+            chmod 600 .env.production
             chmod -R a+rwX "$DEPLOY_PATH/profiles" 2>/dev/null || true
 
             run_compose() {
