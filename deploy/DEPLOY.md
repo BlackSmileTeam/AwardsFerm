@@ -92,6 +92,7 @@ API снаружи не обязателен — nginx фронта прокси
 Workflow: `.github/workflows/deploy-production.yml` (единственный; старые split-workflow удалены)
 
 | Secret | Значение |
+|--------|----------|
 | `PROD_HOST` | `157.22.199.24` |
 | `PROD_USER` | `deploy` |
 | `PROD_SSH_PRIVATE_KEY` | содержимое `~/.ssh/bebochka_firstvds_deploy` |
