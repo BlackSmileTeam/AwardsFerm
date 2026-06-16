@@ -27,91 +27,86 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Pack sources
+      - name: Pack and deploy over SSH
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_PORT: ${{ secrets.PROD_SSH_PORT }}
+          PROD_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_DEPLOY_PATH: ${{ secrets.PROD_DEPLOY_PATH }}
+          PROD_FE_PORT: ${{ secrets.PROD_FRONTEND_PORT }}
+          PROD_API_PORT: ${{ secrets.PROD_API_PORT }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          RSYA_OAUTH_TOKEN: ${{ secrets.RSYA_OAUTH_TOKEN }}
         run: |
-          tar -czf /tmp/awardsferm-deploy.tar.gz \
+          set -euo pipefail
+
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$PROD_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -p "$PROD_PORT" "$PROD_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+          DEPLOY_PATH="${PROD_DEPLOY_PATH:-/opt/awardsferm}"
+          FE_PORT="${PROD_FE_PORT:-55504}"
+          API_PORT="${PROD_API_PORT:-55503}"
+
+          tar -czf - \
             --exclude='.git' \
             --exclude='**/bin' \
             --exclude='**/obj' \
             --exclude='**/node_modules' \
             --exclude='profiles/*/browser-data' \
-            .
+            . | ssh -i ~/.ssh/id_deploy -p "$PROD_PORT" -o StrictHostKeyChecking=yes \
+              "$PROD_USER@$PROD_HOST" \
+              "DEPLOY_PATH='$DEPLOY_PATH' FE_PORT='$FE_PORT' API_PORT='$API_PORT' JWT_SECRET='$JWT_SECRET' RSYA_OAUTH_TOKEN='$RSYA_OAUTH_TOKEN' bash -s" << 'REMOTE'
+          set -eo pipefail
 
-      - name: Upload archive
-        uses: appleboy/scp-action@v1.0.0
-        with:
-          host: ${{ secrets.PROD_HOST }}
-          username: ${{ secrets.PROD_USER }}
-          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
-          port: ${{ secrets.PROD_SSH_PORT }}
-          source: /tmp/awardsferm-deploy.tar.gz
-          target: /tmp
-          overwrite: true
+          echo "==> Deploy path: $DEPLOY_PATH"
+          rm -f /tmp/awardsferm-*.tar.gz /tmp/af-src.tar.gz 2>/dev/null || true
+          mkdir -p "$DEPLOY_PATH/profiles"
+          tar -xzf - -C "$DEPLOY_PATH"
+          cd "$DEPLOY_PATH"
 
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.2.5
-        with:
-          host: ${{ secrets.PROD_HOST }}
-          username: ${{ secrets.PROD_USER }}
-          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
-          port: ${{ secrets.PROD_SSH_PORT }}
-          command_timeout: 45m
-          debug: true
-          script_stop: true
-          script: |
-            set -eo pipefail
-
-            DEPLOY_PATH='${{ secrets.PROD_DEPLOY_PATH }}'
-            if [ -z "$DEPLOY_PATH" ]; then DEPLOY_PATH="/opt/awardsferm"; fi
-
-            echo "==> Deploy path: $DEPLOY_PATH"
-            mkdir -p "$DEPLOY_PATH/profiles"
-            tar -xzf /tmp/awardsferm-deploy.tar.gz -C "$DEPLOY_PATH"
-            rm -f /tmp/awardsferm-deploy.tar.gz
-            cd "$DEPLOY_PATH"
-
-            echo "==> Write .env.production"
-            umask 077
-            FE_PORT='${{ secrets.PROD_FRONTEND_PORT }}'
-            if [ -z "$FE_PORT" ]; then FE_PORT=55504; fi
-            API_PORT='${{ secrets.PROD_API_PORT }}'
-            if [ -z "$API_PORT" ]; then API_PORT=55503; fi
-            JWT_SECRET='${{ secrets.JWT_SECRET }}'
-            if [ -z "$JWT_SECRET" ] && [ -f .env.production ]; then
-              JWT_SECRET=$(grep '^JWT_SECRET=' .env.production | cut -d= -f2- || true)
+          echo "==> Write .env.production"
+          umask 077
+          if [ -z "$FE_PORT" ]; then FE_PORT=55504; fi
+          if [ -z "$API_PORT" ]; then API_PORT=55503; fi
+          if [ -z "$JWT_SECRET" ] && [ -f .env.production ]; then
+            JWT_SECRET=$(grep '^JWT_SECRET=' .env.production | cut -d= -f2- || true)
+          fi
+          if [ -z "$JWT_SECRET" ]; then JWT_SECRET=$(openssl rand -base64 48); fi
+          {
+            echo "DEPLOY_PATH=$DEPLOY_PATH"
+            echo "FRONTEND_PORT=$FE_PORT"
+            echo "API_PORT=$API_PORT"
+            echo "JWT_SECRET=$JWT_SECRET"
+            echo "BROWSER_HEADLESS=true"
+            if [ -n "$RSYA_OAUTH_TOKEN" ]; then
+              echo "RSYA_OAUTH_TOKEN=$RSYA_OAUTH_TOKEN"
             fi
-            if [ -z "$JWT_SECRET" ]; then JWT_SECRET=$(openssl rand -base64 48); fi
-            {
-              echo "DEPLOY_PATH=$DEPLOY_PATH"
-              echo "FRONTEND_PORT=$FE_PORT"
-              echo "API_PORT=$API_PORT"
-              echo "JWT_SECRET=$JWT_SECRET"
-              echo "BROWSER_HEADLESS=true"
-              if [ -n '${{ secrets.RSYA_OAUTH_TOKEN }}' ]; then
-                echo "RSYA_OAUTH_TOKEN=${{ secrets.RSYA_OAUTH_TOKEN }}"
-              fi
-            } > .env.production
-            chmod 600 .env.production
-            chmod -R a+rwX "$DEPLOY_PATH/profiles" 2>/dev/null || true
+          } > .env.production
+          chmod 600 .env.production
+          chmod -R a+rwX "$DEPLOY_PATH/profiles" 2>/dev/null || true
 
-            run_compose() {
-              if docker compose version >/dev/null 2>&1; then
-                docker compose "$@"
-              elif command -v docker-compose >/dev/null 2>&1; then
-                docker-compose "$@"
-              else
-                echo "ERROR: install Docker Compose"
-                exit 1
-              fi
-            }
-
-            if ! run_compose -f docker-compose.production.yml --env-file .env.production up -d --build --remove-orphans; then
-              echo "ERROR: docker compose up failed"
+          run_compose() {
+            if docker compose version >/dev/null 2>&1; then
+              docker compose "$@"
+            elif command -v docker-compose >/dev/null 2>&1; then
+              docker-compose "$@"
+            else
+              echo "ERROR: install Docker Compose"
               exit 1
             fi
+          }
 
-            sleep 8
-            CODE=$(curl -sS -o /tmp/af_health.txt -w "%{http_code}" --max-time 30 "http://127.0.0.1:${API_PORT}/api/health" || echo "000")
-            echo "GET /api/health HTTP $CODE"
-            docker image prune -f || true
-            echo "==> Done"
+          if ! run_compose -f docker-compose.production.yml --env-file .env.production up -d --build --remove-orphans; then
+            echo "ERROR: docker compose up failed"
+            exit 1
+          fi
+
+          sleep 8
+          CODE=$(curl -sS -o /tmp/af_health.txt -w "%{http_code}" --max-time 30 "http://127.0.0.1:${API_PORT}/api/health" || echo "000")
+          echo "GET /api/health HTTP $CODE"
+          docker image prune -f || true
+          echo "==> Done"
+          REMOTE
