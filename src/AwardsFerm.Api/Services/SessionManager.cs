@@ -57,10 +57,11 @@ public sealed class SessionManager
     public SessionInfo StartSession(StartSessionRequest request)
     {
         var profileId = string.IsNullOrWhiteSpace(request.ProfileId) ? "session-001" : request.ProfileId.Trim();
+        var adAccountId = request.AdAccountId;
 
         lock (_lock)
         {
-            if (!_slotStore.Exists(profileId))
+            if (!_slotStore.Exists(profileId, adAccountId))
                 throw new InvalidOperationException($"Слот {profileId} не настроен. Добавьте его в панели.");
 
             if (_profileToSession.TryGetValue(profileId, out var existingId)
@@ -77,8 +78,10 @@ public sealed class SessionManager
             var session = new SessionInfo
             {
                 Id = Guid.NewGuid().ToString("N"),
+                AdAccountId = adAccountId,
                 ProfileId = profileId,
                 AutoRestart = request.AutoRestart ?? true,
+                StopAtMsk = request.StopAtMsk,
                 Status = SessionStatus.Starting,
                 StartedAt = DateTimeOffset.UtcNow,
                 TotalSteps = 12
@@ -206,7 +209,9 @@ public sealed class SessionManager
     private static SessionInfo Clone(SessionInfo source) => new()
     {
         Id = source.Id,
+        AdAccountId = source.AdAccountId,
         ProfileId = source.ProfileId,
+        StopAtMsk = source.StopAtMsk,
         AutoRestart = source.AutoRestart,
         Status = source.Status,
         CurrentStep = source.CurrentStep,

@@ -1,177 +1,182 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using AwardsFerm.Api.Data;
+using AwardsFerm.Api.Data.Entities;
 using AwardsFerm.Core.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace AwardsFerm.Api.Services;
 
 public sealed class SessionSlotStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = true
-    };
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly object _seedLock = new();
+    private volatile bool _seeded;
 
-    private readonly string _slotsPath;
-    private readonly string _profilesRoot;
-    private readonly object _lock = new();
-
-    public SessionSlotStore()
+    public SessionSlotStore(IServiceScopeFactory scopeFactory)
     {
-        _profilesRoot = ProfilesPathHelper.FindProfilesRoot();
-        Directory.CreateDirectory(_profilesRoot);
-        _slotsPath = Path.Combine(_profilesRoot, "slots.json");
-        EnsureDefaults();
+        _scopeFactory = scopeFactory;
     }
 
-    public string ProfilesRoot => _profilesRoot;
+    public string ProfilesRoot => ProfilesPathHelper.FindProfilesRoot();
 
-    public IReadOnlyList<SessionSlotDefinition> GetAll()
+    public IReadOnlyList<SessionSlotDefinition> GetAll(long? adAccountId = null)
     {
-        lock (_lock)
-        {
-            return Load().Slots.Select(Clone).ToList();
-        }
+        EnsureDefaults();
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var query = db.SessionSlots.AsNoTracking().AsQueryable();
+        if (adAccountId.HasValue)
+            query = query.Where(x => x.AdAccountId == adAccountId.Value);
+
+        return query
+            .OrderBy(x => x.ProfileId)
+            .Select(x => new SessionSlotDefinition
+            {
+                Id = x.Id,
+                AdAccountId = x.AdAccountId,
+                ProfileId = x.ProfileId,
+                Label = x.Label,
+                ScheduleEnabled = x.ScheduleEnabled,
+                ScheduledStartMsk = x.ScheduledStartMsk,
+                StopAtMsk = x.StopAtMsk,
+                AutoRestart = x.AutoRestart
+            })
+            .ToList();
     }
 
     public int Count => GetAll().Count;
 
-    public SessionSlotDefinition Add(string? label = null)
+    public SessionSlotDefinition Add(long adAccountId, string? label = null)
     {
-        lock (_lock)
+        EnsureDefaults();
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var nextIndex = db.SessionSlots
+            .AsEnumerable()
+            .Select(s => ParseSessionNumber(s.ProfileId))
+            .DefaultIfEmpty(0)
+            .Max() + 1;
+
+        var profileId = $"session-{nextIndex:D3}";
+        var slot = new SessionSlotEntity
         {
-            var config = Load();
-            if (config.Slots.Count >= 10)
-                throw new InvalidOperationException("Достигнут лимит слотов (10).");
+            AdAccountId = adAccountId,
+            ProfileId = profileId,
+            Label = string.IsNullOrWhiteSpace(label) ? $"Сессия {nextIndex}" : label.Trim(),
+            ScheduleEnabled = false
+        };
 
-            var nextIndex = config.Slots
-                .Select(s => ParseSessionNumber(s.ProfileId))
-                .DefaultIfEmpty(0)
-                .Max() + 1;
+        EnsureProfileDirectory(profileId, slot.Label, nextIndex - 1);
+        db.SessionSlots.Add(slot);
+        db.SaveChanges();
 
-            var profileId = $"session-{nextIndex:D3}";
-            var slot = new SessionSlotDefinition
-            {
-                ProfileId = profileId,
-                Label = string.IsNullOrWhiteSpace(label) ? $"Сессия {nextIndex}" : label.Trim(),
-                ScheduleEnabled = false,
-                ScheduledStartMsk = null
-            };
-
-            EnsureProfileDirectory(profileId, slot.Label, nextIndex - 1);
-            config.Slots.Add(slot);
-            Save(config);
-            return Clone(slot);
-        }
+        return new SessionSlotDefinition
+        {
+            Id = slot.Id,
+            AdAccountId = slot.AdAccountId,
+            ProfileId = slot.ProfileId,
+            Label = slot.Label,
+            ScheduleEnabled = slot.ScheduleEnabled,
+            ScheduledStartMsk = slot.ScheduledStartMsk,
+            StopAtMsk = slot.StopAtMsk,
+            AutoRestart = slot.AutoRestart
+        };
     }
 
-    public SessionSlotDefinition Update(string profileId, UpdateSessionSlotRequest request)
+    public SessionSlotDefinition Update(long adAccountId, string profileId, UpdateSessionSlotRequest request)
     {
-        lock (_lock)
+        EnsureDefaults();
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var slot = db.SessionSlots.FirstOrDefault(s => s.AdAccountId == adAccountId && s.ProfileId == profileId)
+                   ?? throw new InvalidOperationException($"Слот {profileId} не найден.");
+
+        if (!string.IsNullOrWhiteSpace(request.Label))
+            slot.Label = request.Label.Trim();
+
+        if (request.ScheduleEnabled.HasValue)
+            slot.ScheduleEnabled = request.ScheduleEnabled.Value;
+
+        if (request.ScheduledStartMsk is not null)
         {
-            var config = Load();
-            var slot = config.Slots.FirstOrDefault(s => s.ProfileId == profileId)
-                       ?? throw new InvalidOperationException($"Слот {profileId} не найден.");
-
-            if (!string.IsNullOrWhiteSpace(request.Label))
-                slot.Label = request.Label.Trim();
-
-            if (request.ScheduleEnabled.HasValue)
-                slot.ScheduleEnabled = request.ScheduleEnabled.Value;
-
-            if (request.ScheduledStartMsk is not null)
-            {
-                var normalized = NormalizeMskTime(request.ScheduledStartMsk);
-                slot.ScheduledStartMsk = normalized;
-            }
-
-            Save(config);
-            return Clone(slot);
+            var normalized = NormalizeMskTime(request.ScheduledStartMsk);
+            slot.ScheduledStartMsk = normalized;
         }
+
+        if (request.StopAtMsk is not null)
+            slot.StopAtMsk = NormalizeMskTime(request.StopAtMsk);
+
+        if (request.AutoRestart.HasValue)
+            slot.AutoRestart = request.AutoRestart.Value;
+
+        db.SaveChanges();
+
+        return new SessionSlotDefinition
+        {
+            Id = slot.Id,
+            AdAccountId = slot.AdAccountId,
+            ProfileId = slot.ProfileId,
+            Label = slot.Label,
+            ScheduleEnabled = slot.ScheduleEnabled,
+            ScheduledStartMsk = slot.ScheduledStartMsk,
+            StopAtMsk = slot.StopAtMsk,
+            AutoRestart = slot.AutoRestart
+        };
     }
 
-    public void Remove(string profileId)
+    public void Remove(long adAccountId, string profileId)
     {
-        lock (_lock)
-        {
-            var config = Load();
-            if (config.Slots.Count <= 1)
-                throw new InvalidOperationException("Нельзя удалить последний слот.");
-
-            var removed = config.Slots.RemoveAll(s => s.ProfileId == profileId);
-            if (removed == 0)
-                throw new InvalidOperationException($"Слот {profileId} не найден.");
-
-            Save(config);
-        }
+        EnsureDefaults();
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var slot = db.SessionSlots.FirstOrDefault(s => s.AdAccountId == adAccountId && s.ProfileId == profileId)
+                   ?? throw new InvalidOperationException($"Слот {profileId} не найден.");
+        db.SessionSlots.Remove(slot);
+        db.SaveChanges();
     }
 
-    public bool Exists(string profileId) =>
-        GetAll().Any(s => s.ProfileId == profileId);
+    public bool Exists(string profileId, long? adAccountId = null) =>
+        GetAll(adAccountId).Any(s => s.ProfileId == profileId);
 
     private void EnsureDefaults()
     {
-        lock (_lock)
+        if (_seeded) return;
+        lock (_seedLock)
         {
-            if (File.Exists(_slotsPath))
-                return;
+            if (_seeded) return;
 
-            var config = new SessionSlotsConfig
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var firstAccount = db.AdAccounts.OrderBy(x => x.Id).FirstOrDefault();
+            if (firstAccount is null)
+                return;
+            if (db.SessionSlots.Any())
             {
-                Slots =
-                [
-                    new SessionSlotDefinition
-                    {
-                        ProfileId = "session-001",
-                        Label = "Сессия 1",
-                        ScheduleEnabled = false
-                    },
-                    new SessionSlotDefinition
-                    {
-                        ProfileId = "session-002",
-                        Label = "Сессия 2",
-                        ScheduleEnabled = false
-                    }
-                ]
+                _seeded = true;
+                return;
+            }
+
+            var defaults = new[]
+            {
+                new SessionSlotEntity { AdAccountId = firstAccount.Id, ProfileId = "session-001", Label = "Сессия 1" },
+                new SessionSlotEntity { AdAccountId = firstAccount.Id, ProfileId = "session-002", Label = "Сессия 2" }
             };
 
-            foreach (var (slot, index) in config.Slots.Select((s, i) => (s, i)))
-                EnsureProfileDirectory(slot.ProfileId, slot.Label, index);
+            for (var i = 0; i < defaults.Length; i++)
+                EnsureProfileDirectory(defaults[i].ProfileId, defaults[i].Label, i);
 
-            Save(config);
+            db.SessionSlots.AddRange(defaults);
+            db.SaveChanges();
+            _seeded = true;
         }
-    }
-
-    private SessionSlotsConfig Load()
-    {
-        if (!File.Exists(_slotsPath))
-        {
-            EnsureDefaults();
-        }
-
-        var json = File.ReadAllText(_slotsPath);
-        var config = JsonSerializer.Deserialize<SessionSlotsConfig>(json, JsonOptions)
-                     ?? new SessionSlotsConfig();
-
-        if (config.Slots.Count == 0)
-        {
-            EnsureDefaults();
-            json = File.ReadAllText(_slotsPath);
-            config = JsonSerializer.Deserialize<SessionSlotsConfig>(json, JsonOptions)
-                     ?? new SessionSlotsConfig();
-        }
-
-        return config;
-    }
-
-    private void Save(SessionSlotsConfig config)
-    {
-        File.WriteAllText(_slotsPath, JsonSerializer.Serialize(config, JsonOptions));
     }
 
     private void EnsureProfileDirectory(string profileId, string label, int cityIndex)
     {
-        var profileDir = Path.Combine(_profilesRoot, profileId);
+        var profileDir = Path.Combine(ProfilesRoot, profileId);
         Directory.CreateDirectory(profileDir);
 
         var configPath = Path.Combine(profileDir, "config.json");
@@ -200,7 +205,11 @@ public sealed class SessionSlotStore
             proxyUrl = (string?)null
         };
 
-        File.WriteAllText(configPath, JsonSerializer.Serialize(profile, JsonOptions));
+        File.WriteAllText(configPath, JsonSerializer.Serialize(profile, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = true
+        }));
     }
 
     private static int ParseSessionNumber(string profileId)
@@ -227,11 +236,5 @@ public sealed class SessionSlotStore
         return $"{hours:D2}:{minutes:D2}";
     }
 
-    private static SessionSlotDefinition Clone(SessionSlotDefinition source) => new()
-    {
-        ProfileId = source.ProfileId,
-        Label = source.Label,
-        ScheduleEnabled = source.ScheduleEnabled,
-        ScheduledStartMsk = source.ScheduledStartMsk
-    };
+    private static SessionSlotDefinition Clone(SessionSlotDefinition source) => source;
 }

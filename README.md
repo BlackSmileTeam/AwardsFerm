@@ -99,6 +99,39 @@ docker compose -f docker-compose.production.yml --env-file .env.production up -d
 | API | http://localhost:8080 | 8080 |
 | Worker | http://localhost:8081/health | 8081 |
 
+## SQLite + Auth + Accounts (итерация 1)
+
+- База данных: SQLite (EF Core migrations), файл задаётся через env `SQLITE_DB_PATH`.
+- Для контейнера API рекомендуется путь `SQLITE_DB_PATH=/var/lib/awardsferm/awardsferm.db`.
+- На Linux-хосте монтируйте volume:
+  - host: `/var/lib/awardsferm`
+  - container: `/var/lib/awardsferm`
+
+### Миграции
+
+```powershell
+dotnet ef database update --project src\AwardsFerm.Api\AwardsFerm.Api.csproj --startup-project src\AwardsFerm.Api\AwardsFerm.Api.csproj
+```
+
+### Первый админ (SQL)
+
+Файл: `deploy/sql/init-admin.sql`
+
+Логин: `admin`  
+Пароль примера: `Admin123!` (обязательно сменить после первого входа).
+
+### Новые API
+
+- `POST /api/auth/login` — вход по логину/паролю, выдаёт JWT.
+- `GET/POST/PATCH/DELETE /api/adaccounts` — рекламные аккаунты пользователя.
+- `GET /api/userprofit` — прибыль по аккаунтам и суммарно (сегодня/месяц), со snapshot в БД.
+
+### Слоты и сессии
+
+- Слоты (`session-XXX`) и настройки перенесены в БД.
+- `stopAtMsk` (формат `HH:mm`) — таймер остановки сессии по МСК.
+- При наступлении `stopAtMsk` сессия получает `STOP`, браузер закрывается.
+
 ### Переменные окружения (Docker)
 
 | Переменная | Сервис | Значение по умолчанию | Описание |

@@ -1,12 +1,45 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text;
+using AwardsFerm.Api.Auth;
+using AwardsFerm.Api.Data;
 using AwardsFerm.Api.Hubs;
 using AwardsFerm.Api.Options;
 using AwardsFerm.Api.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<YandexRsyaOptions>(builder.Configuration.GetSection(YandexRsyaOptions.SectionName));
+builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOptions.SectionName));
+
+var sqlitePath = Environment.GetEnvironmentVariable("SQLITE_DB_PATH")
+                 ?? builder.Configuration["Database:Path"]
+                 ?? "/var/lib/awardsferm/awardsferm.db";
+var sqliteDir = Path.GetDirectoryName(sqlitePath);
+if (!string.IsNullOrWhiteSpace(sqliteDir))
+    Directory.CreateDirectory(sqliteDir);
+builder.Services.AddDbContext<AppDbContext>(o => o.UseSqlite($"Data Source={sqlitePath}"));
+
+var auth = builder.Configuration.GetSection(AuthOptions.SectionName).Get<AuthOptions>() ?? new AuthOptions();
+var jwtKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(auth.JwtSecret));
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateIssuerSigningKey = true,
+            ValidateLifetime = true,
+            ValidIssuer = auth.JwtIssuer,
+            ValidAudience = auth.JwtAudience,
+            IssuerSigningKey = jwtKey
+        };
+    });
+builder.Services.AddAuthorization();
 builder.Services.AddHttpClient<YandexRsyaStatisticsService>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(30);
@@ -34,6 +67,10 @@ builder.Services.AddHostedService<ScheduledSessionService>();
 builder.Services.AddSingleton<SessionEventBroadcaster>();
 builder.Services.AddSingleton<AwardsFerm.Core.Interfaces.ISessionEventReporter>(sp =>
     sp.GetRequiredService<SessionEventBroadcaster>());
+builder.Services.AddScoped<UserAccountResolver>();
+builder.Services.AddScoped<UserProfitService>();
+builder.Services.AddSingleton<TokenEncryptionService>();
+builder.Services.AddSingleton<JwtTokenService>();
 
 builder.Services.AddHttpClient("worker", client =>
 {
@@ -62,7 +99,15 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.Migrate();
+}
+
 app.UseCors("web");
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapControllers();
 app.MapHub<SessionHub>("/hubs/session");
 

@@ -40,6 +40,14 @@ public sealed class YandexRsyaStatisticsService
         if (string.IsNullOrWhiteSpace(token))
             return RsyaDashboard.NotConfigured();
 
+        return await GetDashboardForTokenAsync(token, cancellationToken);
+    }
+
+    public async Task<RsyaDashboard> GetDashboardForTokenAsync(string token, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return RsyaDashboard.NotConfigured();
+
         try
         {
             var todayTask = FetchPeriodAsync(token, "today", includeDailyPoints: false, cancellationToken);

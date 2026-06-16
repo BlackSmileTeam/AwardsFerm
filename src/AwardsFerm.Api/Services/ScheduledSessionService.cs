@@ -68,8 +68,10 @@ public sealed class ScheduledSessionService : BackgroundService
             {
                 await _runner.StartAsync(new StartSessionRequest
                 {
+                    AdAccountId = slot.AdAccountId,
                     ProfileId = slot.ProfileId,
-                    AutoRestart = true,
+                    StopAtMsk = slot.StopAtMsk,
+                    AutoRestart = slot.AutoRestart,
                     Options = new YandexGamesSearchOptions { Headless = false }
                 }, cancellationToken);
 
