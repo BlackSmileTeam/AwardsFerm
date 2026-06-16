@@ -8,7 +8,16 @@ public static class HumanBehavior
 
     public static async Task DelayAsync(int minMs, int maxMs, CancellationToken cancellationToken = default)
     {
-        await Task.Delay(Random.Next(minMs, maxMs), cancellationToken);
+        if (minMs > maxMs)
+            (minMs, maxMs) = (maxMs, minMs);
+
+        if (minMs == maxMs)
+        {
+            await Task.Delay(minMs, cancellationToken);
+            return;
+        }
+
+        await Task.Delay(Random.Next(minMs, maxMs + 1), cancellationToken);
     }
 
     public static async Task TypeHumanAsync(ILocator locator, string text, CancellationToken cancellationToken = default)
@@ -55,13 +64,20 @@ public static class HumanBehavior
     public static async Task MoveMouseRandomlyAsync(IPage page, CancellationToken cancellationToken = default)
     {
         var vp = page.ViewportSize;
-        var width = vp?.Width ?? 1920;
-        var height = vp?.Height ?? 1080;
+        var width = Math.Max(vp?.Width ?? 1920, 320);
+        var height = Math.Max(vp?.Height ?? 1080, 240);
+
+        var marginX = Math.Clamp(width / 5, 40, 200);
+        var marginY = Math.Clamp(height / 5, 40, 150);
+        var minX = marginX;
+        var maxX = Math.Max(minX + 1, width - marginX);
+        var minY = marginY;
+        var maxY = Math.Max(minY + 1, height - marginY);
 
         for (var i = 0; i < Random.Next(3, 7); i++)
         {
-            var x = Random.Next(200, width - 200);
-            var y = Random.Next(150, height - 150);
+            var x = Random.Next(minX, maxX);
+            var y = Random.Next(minY, maxY);
             await page.Mouse.MoveAsync(x, y, new MouseMoveOptions { Steps = Random.Next(10, 25) });
             await DelayAsync(400, 1200, cancellationToken);
         }
@@ -204,12 +220,14 @@ public static class HumanBehavior
                     case 2:
                     {
                         var vp = page.ViewportSize;
-                        var width = vp?.Width ?? 1920;
-                        var height = vp?.Height ?? 1080;
-                        if (width > 200 && height > 200)
+                        var width = Math.Max(vp?.Width ?? 1920, 320);
+                        var height = Math.Max(vp?.Height ?? 1080, 240);
+                        var marginX = Math.Clamp(width / 5, 40, 100);
+                        var marginY = Math.Clamp(height / 5, 40, 100);
+                        if (width > marginX * 2 && height > marginY * 2)
                         {
-                            var x = Random.Next(100, width - 100);
-                            var y = Random.Next(100, height - 100);
+                            var x = Random.Next(marginX, width - marginX);
+                            var y = Random.Next(marginY, height - marginY);
                             await page.Mouse.MoveAsync(x, y, new MouseMoveOptions { Steps = Random.Next(5, 15) });
                         }
                         break;

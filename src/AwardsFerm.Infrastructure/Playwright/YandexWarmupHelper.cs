@@ -34,8 +34,13 @@ internal static class YandexWarmupHelper
             Message = "Прогрев: просмотр новостных блоков…"
         }, cancellationToken);
 
+        if (minArticles > maxArticles)
+            (minArticles, maxArticles) = (maxArticles, minArticles);
+
         var articlesToRead = Random.Next(minArticles, maxArticles + 1);
         var visited = 0;
+        var attempts = 0;
+        var maxAttempts = Math.Max(articlesToRead * 2, 4);
         var triedHrefs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var hubUrl in NewsHubUrls)
@@ -67,12 +72,13 @@ internal static class YandexWarmupHelper
 
                 foreach (var href in hrefs)
                 {
-                    if (visited >= articlesToRead)
+                    if (visited >= articlesToRead || attempts >= maxAttempts)
                         break;
 
                     if (!triedHrefs.Add(href))
                         continue;
 
+                    attempts++;
                     if (await OpenNewsArticleAsync(page, href, sessionId, reporter, cancellationToken))
                         visited++;
                 }
@@ -120,12 +126,11 @@ internal static class YandexWarmupHelper
                     if (!h || h.startsWith('#') || h.startsWith('javascript:')) return false;
                     const u = h.toLowerCase();
                     if (u.includes('/games')) return false;
+                    if (u.includes('/news/rubric/') || u.includes('/news/region/')) return false;
                     return u.includes('dzen.ru/a/') ||
-                           u.includes('dzen.ru/news/') ||
-                           u.includes('news.yandex') ||
-                           u.includes('yandex.ru/news/') ||
                            u.includes('/news/story/') ||
-                           u.includes('/story/');
+                           u.includes('dzen.ru/news/story/') ||
+                           (u.includes('yandex.ru/news/') && !u.endsWith('/news') && !u.endsWith('/news/'));
                   };
                   for (const a of document.querySelectorAll('a[href]')) {
                     let h = a.href;
@@ -174,6 +179,10 @@ internal static class YandexWarmupHelper
             await HumanBehavior.DelayAsync(2000, 4000, cancellationToken);
 
             if (page.Url.Equals(urlBefore, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (page.Url.Contains("/news/rubric/", StringComparison.OrdinalIgnoreCase)
+                || page.Url.Contains("/news/region/", StringComparison.OrdinalIgnoreCase))
                 return false;
 
             await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, reporter, cancellationToken);
