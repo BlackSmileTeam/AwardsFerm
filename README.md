@@ -8,7 +8,7 @@
 
 ```bash
 # Клонировать на VPS
-git clone git@github.com:sekisov/AwardsFerm.git /opt/awardsferm
+git clone git@github.com:BlackSmileTeam/AwardsFerm.git /opt/awardsferm
 cd /opt/awardsferm
 
 # Подготовка (Docker, каталоги, .env)
