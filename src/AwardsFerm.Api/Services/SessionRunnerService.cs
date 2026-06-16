@@ -34,7 +34,6 @@ public sealed class SessionRunnerService
             {
                 request.StopAtMsk ??= slot.StopAtMsk;
                 request.AutoRestart ??= slot.AutoRestart;
-                request.Options.UseProxy = slot.ProxyEnabled;
             }
         }
 

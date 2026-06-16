@@ -90,12 +90,21 @@ public sealed class PlaywrightBrowserFactory
         }
 
         IBrowserContext context;
-        try
+        var isLinux = OperatingSystem.IsLinux();
+        if (!isLinux)
         {
-            launchOptions.Channel = "chrome";
-            context = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, launchOptions);
+            try
+            {
+                launchOptions.Channel = "chrome";
+                context = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, launchOptions);
+            }
+            catch
+            {
+                launchOptions.Channel = null;
+                context = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, launchOptions);
+            }
         }
-        catch
+        else
         {
             launchOptions.Channel = null;
             context = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, launchOptions);

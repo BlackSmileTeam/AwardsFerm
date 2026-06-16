@@ -1332,4 +1332,72 @@ internal static class YandexUiHelper
         throw new TimeoutException(
             $"Страница игры не открылась за 60 сек. Открытые вкладки: {urls}");
     }
+
+    private static readonly string[] SearchInputSelectors =
+    [
+        "#search-input",
+        "input[data-testid='search-text-input']",
+        "input[type='search']",
+        "input[placeholder*='Найти игру']",
+        "input[placeholder*='Поиск']",
+        "input[aria-label*='Поиск']",
+        ".search-input input"
+    ];
+
+    public static async Task FocusSearchInputAsync(IPage page, CancellationToken cancellationToken)
+    {
+        var input = await FindSearchInputLocatorAsync(page);
+        try
+        {
+            await input.FocusAsync(new LocatorFocusOptions { Timeout = 10_000 });
+        }
+        catch (PlaywrightException)
+        {
+            await input.ClickAsync(new LocatorClickOptions { Force = true, Timeout = 5000 });
+        }
+
+        await HumanBehavior.DelayAsync(200, 500, cancellationToken);
+    }
+
+    public static async Task<bool> FillSearchQueryAsync(IPage page, string query, CancellationToken cancellationToken)
+    {
+        var input = await FindSearchInputLocatorAsync(page);
+        try
+        {
+            await input.ClickAsync(new LocatorClickOptions { Force = true, Timeout = 5000 });
+            await input.FillAsync(string.Empty, new LocatorFillOptions { Force = true, Timeout = 5000 });
+            await input.FillAsync(query, new LocatorFillOptions { Force = true, Timeout = 10_000 });
+            await HumanBehavior.DelayAsync(300, 700, cancellationToken);
+            return true;
+        }
+        catch (PlaywrightException)
+        {
+            var ok = await page.EvaluateAsync<bool>(
+                @"([query]) => {
+                    const el = document.querySelector('#search-input')
+                        || document.querySelector('input[data-testid=search-text-input]')
+                        || document.querySelector('input[type=search]');
+                    if (!el) return false;
+                    el.focus();
+                    el.value = query;
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                    return true;
+                }",
+                new object[] { query });
+            return ok;
+        }
+    }
+
+    private static async Task<ILocator> FindSearchInputLocatorAsync(IPage page)
+    {
+        foreach (var selector in SearchInputSelectors)
+        {
+            var locator = page.Locator(selector).First;
+            if (await locator.CountAsync() > 0 && await locator.IsVisibleAsync())
+                return locator;
+        }
+
+        throw new InvalidOperationException("Строка поиска на Яндекс Играх не найдена.");
+    }
 }

@@ -54,9 +54,21 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
             IPage page = null!;
             var useProxy = options.UseProxy;
             var maxProxyAttempts = useProxy ? 5 : 1;
+            if (!useProxy)
+            {
+                await ReportLogAsync(sessionId, "Прокси отключён в настройках слота", cancellationToken);
+            }
+
             for (var proxyTry = 0; proxyTry < maxProxyAttempts; proxyTry++)
             {
                 sessionProfile = DeviceFingerprintRotator.RotateForSession(profile, _profilesRoot, useProxy);
+                if (useProxy && sessionProfile.ProxyUrl is null)
+                {
+                    await ReportLogAsync(
+                        sessionId,
+                        "Прокси включён, но не найден в profiles/proxies.txt — проверьте файл и proxy.auth.json",
+                        cancellationToken);
+                }
                 if (sessionProfile.ProxyUrl is not null)
                     sessionProfile.ProxyUrl = ProxyUrlHelper.WithRetryPortOffset(sessionProfile.ProxyUrl, proxyTry);
 
@@ -202,23 +214,32 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                 page = activePage!.Resolve();
                 await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, _eventReporter, cancellationToken);
                 await YandexUiHelper.DismissPopupsAsync(page, cancellationToken);
-                var searchInput = await FindSearchInputAsync(page);
-                await HumanBehavior.MoveAndClickAsync(page, searchInput, cancellationToken);
+                await YandexUiHelper.FocusSearchInputAsync(page, cancellationToken);
             });
 
             await RunStepAsync(sessionId, profile.Id, 6, $"Ввод запроса «{options.SearchQuery}»", cancellationToken, async () =>
             {
                 page = activePage!.Resolve();
-                var searchInput = await FindSearchInputAsync(page);
-                await searchInput.ClickAsync();
-                await page.Keyboard.PressAsync("Control+A");
-                await page.Keyboard.PressAsync("Backspace");
-                await HumanBehavior.TypeHumanAsync(searchInput, options.SearchQuery, cancellationToken);
+                var filled = await YandexUiHelper.FillSearchQueryAsync(page, options.SearchQuery, cancellationToken);
+                if (!filled)
+                {
+                    var searchUrl =
+                        $"https://yandex.ru/games/search?query={Uri.EscapeDataString(options.SearchQuery)}";
+                    await ReportLogAsync(sessionId, "Поле поиска перекрыто — открываем поиск по URL", cancellationToken);
+                    await SessionNavigationHelper.GotoWithRetryAsync(page, searchUrl, cancellationToken);
+                    await HumanBehavior.DelayAsync(2000, 3500, cancellationToken);
+                }
             });
 
             await RunStepAsync(sessionId, profile.Id, 7, "Запуск поиска", cancellationToken, async () =>
             {
                 page = activePage!.Resolve();
+                if (page.Url.Contains("/search", StringComparison.OrdinalIgnoreCase))
+                {
+                    await HumanBehavior.DelayAsync(1000, 2000, cancellationToken);
+                    return;
+                }
+
                 await HumanBehavior.DelayAsync(500, 1200, cancellationToken);
                 await page.Keyboard.PressAsync("Enter");
                 await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded, new PageWaitForLoadStateOptions { Timeout = 30_000 });
