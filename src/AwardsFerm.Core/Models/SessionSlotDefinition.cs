@@ -12,6 +12,7 @@ public sealed class SessionSlotDefinition
     /// <summary>Остановить по Москве, формат HH:mm.</summary>
     public string? StopAtMsk { get; set; }
     public bool AutoRestart { get; set; } = true;
+    public bool ProxyEnabled { get; set; } = true;
 }
 
 public sealed class SessionSlotsConfig
@@ -26,6 +27,7 @@ public sealed class UpdateSessionSlotRequest
     public string? ScheduledStartMsk { get; set; }
     public string? StopAtMsk { get; set; }
     public bool? AutoRestart { get; set; }
+    public bool? ProxyEnabled { get; set; }
 }
 
 public sealed class CreateSessionSlotRequest

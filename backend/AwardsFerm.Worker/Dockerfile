@@ -19,7 +19,7 @@ COPY --from=build /app/publish .
 RUN apt-get update && apt-get install -y --no-install-recommends xvfb curl \
     && rm -rf /var/lib/apt/lists/*
 ENV ASPNETCORE_URLS=http://+:8081
-ENV DISPLAY=:99
-ENV BROWSER_HEADLESS=false
+ENV BROWSER_HEADLESS=true
 EXPOSE 8081
-ENTRYPOINT ["sh", "-c", "Xvfb :99 -screen 0 1920x1080x24 & dotnet AwardsFerm.Worker.dll"]
+# Headless по умолчанию (Linux VPS). BROWSER_HEADLESS=false — запуск Xvfb для headed.
+ENTRYPOINT ["sh", "-c", "if [ \"$BROWSER_HEADLESS\" = \"false\" ]; then export DISPLAY=:99; Xvfb :99 -screen 0 1920x1080x24 & fi; exec dotnet AwardsFerm.Worker.dll"]

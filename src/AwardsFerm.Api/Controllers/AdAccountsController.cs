@@ -29,7 +29,7 @@ public sealed class AdAccountsController : ControllerBase
         var userId = GetUserId();
         var accounts = await _db.AdAccounts
             .Where(x => x.UserId == userId)
-            .OrderBy(x => x.CreatedAt)
+            .OrderBy(x => x.Id)
             .Select(x => new AdAccountDto
             {
                 Id = x.Id,

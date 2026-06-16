@@ -166,6 +166,7 @@
 .status-completed { color: #81c995; }
 .status-failed { color: #f28b82; }
 .status-stopped { color: #fdd663; }
+.status-paused { color: #c58af9; }
 
 .error-banner {
   background: #3b1817;
@@ -266,6 +267,20 @@
   color: #5f6368;
 }
 
+.profile-ip {
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
+  color: #9aa0a6;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+}
+
+.profile-traffic {
+  margin-top: 0.1rem;
+  font-size: 0.72rem;
+  color: #7b8794;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+}
+
 .session-toolbar {
   display: flex;
   align-items: center;
@@ -293,8 +308,68 @@
 }
 
 .session-log {
-  height: 120px;
+  height: 220px;
   font-size: 0.72rem;
+}
+
+.session-log-tall {
+  height: 280px;
+  min-height: 160px;
+}
+
+.log-line-warn {
+  color: #fdd663;
+}
+
+.log-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.log-panel-title {
+  font-size: 0.75rem;
+  color: #9aa0a6;
+  font-weight: 500;
+}
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #2d3348;
+  border-radius: 6px;
+  background: #1e2230;
+  color: #9aa0a6;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.btn-icon:hover:not(:disabled) {
+  color: #e8eaed;
+  border-color: #5f6368;
+  background: #252a38;
+}
+
+.btn-icon:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.btn-icon-ok {
+  color: #81c995;
+  border-color: #1e8e3e;
+}
+
+.sessions-toolbar-meta {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 @media (max-width: 960px) {
@@ -609,3 +684,335 @@
   justify-content: flex-end;
   gap: 0.5rem;
 }
+
+/* Login */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: #0d1117;
+}
+
+.login-card {
+  width: min(100%, 380px);
+  background: #161b26;
+  border: 1px solid #2d3348;
+  border-radius: 14px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.login-card h1 {
+  margin: 0;
+  color: #fff;
+  font-size: 1.5rem;
+}
+
+.login-subtitle {
+  margin: 0;
+  color: #9aa0a6;
+  font-size: 0.9rem;
+}
+
+.login-error {
+  background: #3b1817;
+  border: 1px solid #c5221f;
+  color: #f28b82;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.login-submit {
+  margin-top: 0.25rem;
+}
+
+/* Forms */
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: #9aa0a6;
+}
+
+.form-field input,
+.form-field select,
+.account-selector select {
+  background: #1e2230;
+  border: 1px solid #2d3348;
+  border-radius: 8px;
+  color: #e8eaed;
+  padding: 0.55rem 0.65rem;
+  font-size: 0.9rem;
+}
+
+/* Tabs */
+.app-tabs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.tab-btn {
+  border: 1px solid #2d3348;
+  background: #161b26;
+  color: #9aa0a6;
+  border-radius: 999px;
+  padding: 0.45rem 1rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.tab-btn-active {
+  background: #1a73e8;
+  border-color: #1a73e8;
+  color: #fff;
+}
+
+.account-selector {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  background: #161b26;
+  border: 1px solid #2d3348;
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+}
+
+.account-selector label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: #9aa0a6;
+  min-width: 240px;
+}
+
+/* Accounts panel */
+.accounts-panel {
+  background: #161b26;
+  border: 1px solid #2d3348;
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.panel-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #e8eaed;
+}
+
+.panel-muted {
+  color: #9aa0a6;
+  font-size: 0.85rem;
+}
+
+.panel-error {
+  background: #3b1817;
+  border: 1px solid #c5221f;
+  color: #f28b82;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.panel-success {
+  background: #14301d;
+  border: 1px solid #1e8e3e;
+  color: #81c995;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.accounts-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.65rem;
+}
+
+.account-card {
+  border: 1px solid #2d3348;
+  border-radius: 10px;
+  padding: 0.75rem;
+  cursor: pointer;
+  background: #1e2230;
+}
+
+.account-card-active {
+  border-color: #1a73e8;
+  box-shadow: 0 0 0 1px rgba(26, 115, 232, 0.35);
+}
+
+.account-card-title {
+  font-weight: 600;
+  color: #e8eaed;
+  font-size: 0.92rem;
+}
+
+.account-card-meta {
+  margin-top: 0.25rem;
+  color: #9aa0a6;
+  font-size: 0.78rem;
+}
+
+.account-card-actions {
+  margin-top: 0.5rem;
+  display: flex;
+  gap: 0.35rem;
+}
+
+.account-form {
+  border-top: 1px solid #2d3348;
+  padding-top: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.account-form h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #e8eaed;
+}
+
+.account-form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid #2d3348;
+  color: #bdc1c6;
+}
+
+/* Profit table */
+.profit-table-wrap {
+  overflow-x: auto;
+  margin-top: 0.75rem;
+}
+
+.profit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.profit-table th,
+.profit-table td {
+  text-align: left;
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid #2d3348;
+}
+
+.profit-table th {
+  color: #9aa0a6;
+  font-weight: 500;
+}
+
+.profit-game {
+  color: #9aa0a6;
+  max-width: 220px;
+}
+
+.session-stop-at {
+  font-size: 0.7rem;
+  color: #fdd663;
+}
+
+/* Admin slots table */
+.admin-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.panel-loading {
+  color: #9aa0a6;
+  padding: 2rem;
+  text-align: center;
+}
+
+.slots-table-wrap {
+  overflow-x: auto;
+  background: #161b26;
+  border: 1px solid #2d3348;
+  border-radius: 12px;
+}
+
+.slots-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.slots-table th,
+.slots-table td {
+  text-align: left;
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid #2d3348;
+  vertical-align: middle;
+}
+
+.slots-table th {
+  color: #9aa0a6;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.slot-label {
+  font-weight: 600;
+  color: #e8eaed;
+}
+
+.slot-ip {
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: #9aa0a6;
+}
+
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.slot-actions {
+  display: flex;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.slots-hint {
+  color: #9aa0a6;
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+.slot-log {
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  color: #9aa0a6;
+  line-height: 1.3;
+  max-width: 220px;
+}
+
+.slot-log-warn {
+  color: #fdd663;
+}
+

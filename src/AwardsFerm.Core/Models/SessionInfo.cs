@@ -12,6 +12,8 @@ public sealed class SessionInfo
     public int TotalSteps { get; set; } = 12;
     public string CurrentStepName { get; set; } = string.Empty;
     public string? ErrorMessage { get; set; }
+    public string? PublicIp { get; set; }
+    public long TrafficBytes { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
     public List<string> Logs { get; set; } = [];

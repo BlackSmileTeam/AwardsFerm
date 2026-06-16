@@ -34,6 +34,10 @@ internal static class StealthScripts
                 get: () => {{profile.DeviceMemory}},
             });
 
+            Object.defineProperty(navigator, 'maxTouchPoints', {
+                get: () => {{profile.MaxTouchPoints}},
+            });
+
             const originalQuery = window.navigator.permissions.query;
             window.navigator.permissions.query = (parameters) =>
                 parameters.name === 'notifications'

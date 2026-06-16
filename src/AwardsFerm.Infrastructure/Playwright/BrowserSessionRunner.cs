@@ -13,17 +13,20 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
     private readonly PlaywrightBrowserFactory _browserFactory;
     private readonly ICookieStore _cookieStore;
     private readonly ISessionEventReporter _eventReporter;
+    private readonly ISessionPauseCoordinator _pauseCoordinator;
     private readonly string _profilesRoot;
 
     public BrowserSessionRunner(
         PlaywrightBrowserFactory browserFactory,
         ICookieStore cookieStore,
         ISessionEventReporter eventReporter,
+        ISessionPauseCoordinator pauseCoordinator,
         ProfileRepository profileRepository)
     {
         _browserFactory = browserFactory;
         _cookieStore = cookieStore;
         _eventReporter = eventReporter;
+        _pauseCoordinator = pauseCoordinator;
         _profilesRoot = profileRepository.ProfilesRoot;
     }
 
@@ -37,70 +40,124 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
         var screenshotCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         ActivePageHolder? activePage = null;
         var playGameOverCount = 0;
+        DesktopProfile? sessionProfile = null;
+        SessionTrafficMonitor? trafficMonitor = null;
+        var accumulatedTrafficBytes = 0L;
+        var trafficCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var geoCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         try
         {
             await ReportStatusAsync(sessionId, SessionStatus.Starting, cancellationToken);
 
-            var sessionProfile = DeviceFingerprintRotator.RotateForSession(profile, _profilesRoot);
-            DeviceFingerprintRotator.PruneOldBrowserInstances(_profilesRoot, profile.Id);
-            await ReportLogAsync(
-                sessionId,
-                $"Новая сессия браузера ({sessionProfile.BrowserSessionId[..8]}…): {DeviceFingerprintRotator.Describe(sessionProfile)}",
-                cancellationToken);
-
-            launch = await _browserFactory.LaunchPersistentAsync(sessionProfile, options, _profilesRoot, cancellationToken);
-            var context = launch.Context;
-            activePage = new ActivePageHolder { Context = context, Page = launch.Page, UrlPart = options.TargetGameUrlPart };
-            var page = activePage.Page;
-
-            await SessionLocationHelper.ApplyAsync(context, page, sessionProfile, cancellationToken);
-
-            var publicIp = await SessionNetworkHelper.GetPublicIpAsync(page, cancellationToken);
-            if (publicIp is not null)
+            IBrowserContext context = null!;
+            IPage page = null!;
+            var useProxy = options.UseProxy;
+            var maxProxyAttempts = useProxy ? 5 : 1;
+            for (var proxyTry = 0; proxyTry < maxProxyAttempts; proxyTry++)
             {
+                sessionProfile = DeviceFingerprintRotator.RotateForSession(profile, _profilesRoot, useProxy);
+                if (sessionProfile.ProxyUrl is not null)
+                    sessionProfile.ProxyUrl = ProxyUrlHelper.WithRetryPortOffset(sessionProfile.ProxyUrl, proxyTry);
+
+                DeviceFingerprintRotator.PruneOldBrowserInstances(_profilesRoot, profile.Id);
                 await ReportLogAsync(
                     sessionId,
-                    $"Внешний IP сессии: {publicIp}",
+                    $"Новая сессия браузера ({sessionProfile.BrowserSessionId[..8]}…): {DeviceFingerprintRotator.Describe(sessionProfile)}" +
+                    (ProxyUrlHelper.TryParseProxy(sessionProfile.ProxyUrl, out var proxyCreds) && proxyCreds.Username is not null
+                        ? $" · auth: {proxyCreds.Username}"
+                        : ""),
                     cancellationToken);
 
-                var ipGeo = await SessionLocationHelper.LookupByIpAsync(page, publicIp, cancellationToken);
-                if (ipGeo is not null && sessionProfile.ProxyUrl is not null)
+                launch = await _browserFactory.LaunchPersistentAsync(sessionProfile, options, _profilesRoot, cancellationToken);
+                context = launch.Context;
+                activePage = new ActivePageHolder { Context = context, Page = launch.Page, UrlPart = options.TargetGameUrlPart };
+                page = activePage.Page;
+
+                await SessionLocationHelper.ApplyAsync(context, page, sessionProfile, cancellationToken);
+
+                var connectivity = await SessionNetworkHelper.CheckProxyConnectivityAsync(page, cancellationToken);
+                var publicIp = connectivity.PublicIp;
+                if (publicIp is not null)
                 {
-                    SessionLocationHelper.ApplyLookupToProfile(sessionProfile, ipGeo);
-                    await SessionLocationHelper.ApplyAsync(context, page, sessionProfile, cancellationToken);
+                    if (sessionProfile.ProxyUrl is not null)
+                        ProxyRotator.ReportSuccess(sessionProfile.ProxyUrl);
+
+                    await _eventReporter.ReportAsync(new SessionEvent
+                    {
+                        SessionId = sessionId,
+                        Type = SessionEventType.IpDetected,
+                        PublicIp = publicIp
+                    }, cancellationToken);
+
                     await ReportLogAsync(
                         sessionId,
-                        $"Локация по IP прокси: {SessionLocationHelper.Format(sessionProfile)}",
+                        $"Внешний IP сессии: {publicIp}",
                         cancellationToken);
+
+                    var ipGeo = await SessionLocationHelper.LookupByIpAsync(page, publicIp, cancellationToken);
+                    if (ipGeo is not null && sessionProfile.ProxyUrl is not null)
+                    {
+                        SessionLocationHelper.ApplyLookupToProfile(sessionProfile, ipGeo);
+                        await SessionLocationHelper.ApplyAsync(context, page, sessionProfile, cancellationToken);
+                        await ReportLogAsync(
+                            sessionId,
+                            $"Локация по IP прокси: {SessionLocationHelper.Format(sessionProfile)}",
+                            cancellationToken);
+                    }
+                    else
+                    {
+                        await ReportLogAsync(
+                            sessionId,
+                            $"Локация: {SessionLocationHelper.Format(sessionProfile)}",
+                            cancellationToken);
+                    }
                 }
                 else
                 {
+                    if (sessionProfile.ProxyUrl is not null)
+                    {
+                        ProxyRotator.ReportFailure(sessionProfile.ProxyUrl);
+                        var detail = connectivity.DescribeFailure();
+                        await ReportLogAsync(sessionId,
+                            $"Прокси недоступна ({detail}) — попытка {proxyTry + 1}/{maxProxyAttempts}. " +
+                            ProxyUrlHelper.DescribeProxyFailureHint(sessionProfile.ProxyUrl, connectivity.ErrorCode),
+                            cancellationToken);
+
+                        accumulatedTrafficBytes += trafficMonitor?.TotalBytes ?? 0;
+                        if (trafficMonitor is not null)
+                            await trafficMonitor.DisposeAsync();
+                        trafficMonitor = null;
+                        await launch.DisposeAsync();
+                        launch = null;
+                        continue;
+                    }
+
                     await ReportLogAsync(
                         sessionId,
-                        $"Локация: {SessionLocationHelper.Format(sessionProfile)}",
+                        "Прокси отключён — продолжаем без внешнего IP",
                         cancellationToken);
                 }
-            }
-            else
-            {
-                await ReportLogAsync(
-                    sessionId,
-                    $"Локация: {SessionLocationHelper.Format(sessionProfile)}",
-                    cancellationToken);
+
+                await _cookieStore.LoadAsync(context, sessionProfile.CookiesPath, cancellationToken);
+                trafficMonitor = await SessionTrafficMonitor.AttachAsync(context, cancellationToken);
+                _ = StreamScreenshotsAsync(sessionId, activePage, screenshotCts.Token);
+                _ = StreamTrafficAsync(sessionId, () => accumulatedTrafficBytes, () => trafficMonitor, trafficCts.Token);
+                _ = StreamGeoDriftAsync(sessionId, activePage, sessionProfile, geoCts.Token);
+
+                // Успешный старт: дальше выполняем сценарий.
+                break;
             }
 
-            await _cookieStore.LoadAsync(context, sessionProfile.CookiesPath, cancellationToken);
-            _ = StreamScreenshotsAsync(sessionId, activePage, screenshotCts.Token);
+            if (launch is null)
+                throw new PlaywrightException(useProxy
+                    ? "All proxy attempts failed."
+                    : "Browser launch failed.");
 
-            await RunStepAsync(sessionId, 1, "Прогрев: открытие yandex.ru", cancellationToken, async () =>
+            await RunStepAsync(sessionId, profile.Id, 1, "Прогрев: открытие yandex.ru", cancellationToken, async () =>
             {
                 page = activePage!.Resolve();
-                await page.GotoAsync("https://yandex.ru/", new PageGotoOptions
-                {
-                    WaitUntil = WaitUntilState.DOMContentLoaded,
-                    Timeout = 60_000
-                });
+                await SessionNavigationHelper.GotoWithRetryAsync(page, "https://yandex.ru/", cancellationToken);
                 await HumanBehavior.DelayAsync(3000, 5000, cancellationToken);
                 await YandexUiHelper.DismissPopupsAsync(page, cancellationToken);
                 await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, _eventReporter, cancellationToken);
@@ -108,7 +165,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                 await HumanBehavior.DelayAsync(2000, 4000, cancellationToken);
             });
 
-            await RunStepAsync(sessionId, 2, "Прогрев: новости и главная Яндекса", cancellationToken, async () =>
+            await RunStepAsync(sessionId, profile.Id, 2, "Прогрев: новости и главная Яндекса", cancellationToken, async () =>
             {
                 page = activePage!.Resolve();
                 await YandexUiHelper.DismissPopupsAsync(page, cancellationToken);
@@ -117,20 +174,16 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                 await HumanBehavior.DelayAsync(2000, 4000, cancellationToken);
             });
 
-            await RunStepAsync(sessionId, 3, "Переход на Яндекс Игры", cancellationToken, async () =>
+            await RunStepAsync(sessionId, profile.Id, 3, "Переход на Яндекс Игры", cancellationToken, async () =>
             {
                 page = activePage!.Resolve();
-                await page.GotoAsync("https://yandex.ru/games", new PageGotoOptions
-                {
-                    WaitUntil = WaitUntilState.DOMContentLoaded,
-                    Timeout = 60_000
-                });
+                await SessionNavigationHelper.GotoWithRetryAsync(page, "https://yandex.ru/games", cancellationToken);
                 await HumanBehavior.DelayAsync(3000, 5000, cancellationToken);
                 await YandexUiHelper.DismissPopupsAsync(page, cancellationToken);
                 await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, _eventReporter, cancellationToken);
             });
 
-            await RunStepAsync(sessionId, 4, "Закрытие cookie-баннера и попапов", cancellationToken, async () =>
+            await RunStepAsync(sessionId, profile.Id, 4, "Закрытие cookie-баннера и попапов", cancellationToken, async () =>
             {
                 page = activePage!.Resolve();
                 await YandexUiHelper.DismissPopupsAsync(page, cancellationToken);
@@ -144,7 +197,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                 await HumanBehavior.DelayAsync(800, 1500, cancellationToken);
             });
 
-            await RunStepAsync(sessionId, 5, "Открытие строки поиска", cancellationToken, async () =>
+            await RunStepAsync(sessionId, profile.Id, 5, "Открытие строки поиска", cancellationToken, async () =>
             {
                 page = activePage!.Resolve();
                 await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, _eventReporter, cancellationToken);
@@ -153,7 +206,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                 await HumanBehavior.MoveAndClickAsync(page, searchInput, cancellationToken);
             });
 
-            await RunStepAsync(sessionId, 6, $"Ввод запроса «{options.SearchQuery}»", cancellationToken, async () =>
+            await RunStepAsync(sessionId, profile.Id, 6, $"Ввод запроса «{options.SearchQuery}»", cancellationToken, async () =>
             {
                 page = activePage!.Resolve();
                 var searchInput = await FindSearchInputAsync(page);
@@ -163,7 +216,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                 await HumanBehavior.TypeHumanAsync(searchInput, options.SearchQuery, cancellationToken);
             });
 
-            await RunStepAsync(sessionId, 7, "Запуск поиска", cancellationToken, async () =>
+            await RunStepAsync(sessionId, profile.Id, 7, "Запуск поиска", cancellationToken, async () =>
             {
                 page = activePage!.Resolve();
                 await HumanBehavior.DelayAsync(500, 1200, cancellationToken);
@@ -174,15 +227,33 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                 await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, _eventReporter, cancellationToken);
             });
 
-            await RunStepAsync(sessionId, 8, "Ожидание результатов поиска", cancellationToken, async () =>
+            await RunStepAsync(sessionId, profile.Id, 8, "Ожидание результатов поиска", cancellationToken, async () =>
             {
                 page = activePage!.Resolve();
-                await page.WaitForSelectorAsync("a[href*='/games/']", new PageWaitForSelectorOptions { Timeout = 25_000 });
+                var found = await SessionNavigationHelper.TryWaitForSearchResultsAsync(page, cancellationToken);
+                if (!found)
+                {
+                    await ReportLogAsync(sessionId,
+                        "Выдача не появилась — открываем поиск по URL",
+                        cancellationToken);
+                    var searchUrl =
+                        $"https://yandex.ru/games/search?query={Uri.EscapeDataString(options.SearchQuery)}";
+                    await SessionNavigationHelper.GotoWithRetryAsync(page, searchUrl, cancellationToken);
+                    await HumanBehavior.DelayAsync(2500, 4000, cancellationToken);
+                    await YandexUiHelper.DismissPopupsAsync(page, cancellationToken);
+                    await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, _eventReporter, cancellationToken);
+                    found = await SessionNavigationHelper.TryWaitForSearchResultsAsync(page, cancellationToken, 40_000);
+                }
+
+                if (!found)
+                    throw new InvalidOperationException(
+                        $"Результаты поиска «{options.SearchQuery}» не загрузились — проверьте капчу или селекторы.");
+
                 await HumanBehavior.ScrollNaturallyAsync(page, cancellationToken);
             });
 
             ILocator? gameLink = null;
-            await RunStepAsync(sessionId, 9, $"Поиск игры «{options.TargetGameTitle}»", cancellationToken, async () =>
+            await RunStepAsync(sessionId, profile.Id, 9, $"Поиск игры «{options.TargetGameTitle}»", cancellationToken, async () =>
             {
                 page = activePage!.Resolve();
                 gameLink = await FindGameLinkAsync(page, options);
@@ -191,7 +262,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                         $"Игра «{options.TargetGameTitle}» не найдена в выдаче по запросу «{options.SearchQuery}».");
             });
 
-            await RunStepAsync(sessionId, 10, "Переход на страницу игры", cancellationToken, async () =>
+            await RunStepAsync(sessionId, profile.Id, 10, "Переход на страницу игры", cancellationToken, async () =>
             {
                 page = activePage!.Resolve();
                 gameLink ??= await FindGameLinkAsync(page, options)
@@ -227,7 +298,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                 await ReportLogAsync(sessionId, $"Открыта вкладка игры: {page.Url}", cancellationToken);
             });
 
-            await RunStepAsync(sessionId, 11, "Нажатие кнопки «Играть» и загрузка игры", cancellationToken, async () =>
+            await RunStepAsync(sessionId, profile.Id, 11, "Нажатие кнопки «Играть» и загрузка игры", cancellationToken, async () =>
             {
                 var gamePage = await YandexUiHelper.EnterGameAsync(
                     context,
@@ -248,7 +319,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
             _ = playMinutes;
             _ = playMinutesMax;
             var rotateSessionAfterPlay = false;
-            await RunStepAsync(sessionId, 12, "Игра (непрерывный цикл)", cancellationToken, async () =>
+            await RunStepAsync(sessionId, profile.Id, 12, "Игра (непрерывный цикл)", cancellationToken, async () =>
             {
                 page = activePage!.Resolve();
 
@@ -258,10 +329,12 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                 var playOutcome = await SlitherGamePlayHelper.PlaySessionAsync(
                     context,
                     page,
+                    profile.Id,
                     options.PlayDurationMinSeconds,
                     options.PlayDurationMaxSeconds,
                     sessionId,
                     _eventReporter,
+                    _pauseCoordinator,
                     cancellationToken);
                 playGameOverCount = playOutcome.GamesPlayed;
 
@@ -271,7 +344,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                         sessionId,
                         $"Смена устройства после {playOutcome.GamesPlayed} игр — перезапуск с новым профилем",
                         cancellationToken);
-                    await _cookieStore.SaveAsync(context, sessionProfile.CookiesPath, cancellationToken);
+                    await _cookieStore.SaveAsync(context, sessionProfile!.CookiesPath, cancellationToken);
                     rotateSessionAfterPlay = true;
                 }
             });
@@ -279,7 +352,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
             if (rotateSessionAfterPlay)
                 return SessionRunResult.RestartAfterGameOvers(playGameOverCount);
 
-            await _cookieStore.SaveAsync(context, sessionProfile.CookiesPath, cancellationToken);
+            await _cookieStore.SaveAsync(context, sessionProfile!.CookiesPath, cancellationToken);
             return SessionRunResult.Completed(playGameOverCount);
         }
         catch (OperationCanceledException)
@@ -304,25 +377,119 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                 return SessionRunResult.BrowserClosed(playGameOverCount);
             }
 
+            if (sessionProfile?.ProxyUrl is not null && SessionNavigationHelper.IsProxyNetworkError(ex))
+            {
+                ProxyRotator.ReportFailure(sessionProfile.ProxyUrl);
+                await ReportLogAsync(sessionId,
+                    "Сбой сети через прокси — исключаем из пула до cooldown",
+                    CancellationToken.None);
+            }
+
             await ReportLogAsync(sessionId, $"Ошибка: {ex.Message} — будет перезапуск", CancellationToken.None);
             return SessionRunResult.BrowserClosed(playGameOverCount);
         }
         finally
         {
             screenshotCts.Cancel();
+            trafficCts.Cancel();
+            geoCts.Cancel();
+            var finalTraffic = accumulatedTrafficBytes + (trafficMonitor?.TotalBytes ?? 0);
+            if (finalTraffic > 0)
+                _ = ReportTrafficUpdateAsync(sessionId, finalTraffic, CancellationToken.None);
+
             await Task.Delay(200);
+            if (trafficMonitor is not null)
+                await trafficMonitor.DisposeAsync();
             if (launch is not null)
                 await launch.DisposeAsync();
         }
     }
 
+    private async Task StreamGeoDriftAsync(
+        string sessionId,
+        ActivePageHolder activePage,
+        DesktopProfile profile,
+        CancellationToken cancellationToken)
+    {
+        var random = new Random();
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var delayMinutes = random.Next(4, 9);
+                await Task.Delay(TimeSpan.FromMinutes(delayMinutes), cancellationToken);
+
+                if (!activePage.TryResolve(out var page) || page is null)
+                    continue;
+
+                SessionLocationHelper.ApplyRandomDrift(profile, random);
+                await SessionLocationHelper.ApplyAsync(page.Context, page, profile, cancellationToken);
+                await ReportLogAsync(
+                    sessionId,
+                    $"Геолокация смещена: {SessionLocationHelper.Format(profile)}",
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch
+            {
+                await Task.Delay(60_000, cancellationToken);
+            }
+        }
+    }
+
+    private async Task StreamTrafficAsync(
+        string sessionId,
+        Func<long> accumulatedBytes,
+        Func<SessionTrafficMonitor?> monitor,
+        CancellationToken cancellationToken)
+    {
+        long lastReported = -1;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var total = accumulatedBytes() + (monitor()?.TotalBytes ?? 0);
+                if (total != lastReported)
+                {
+                    lastReported = total;
+                    await ReportTrafficUpdateAsync(sessionId, total, cancellationToken);
+                }
+
+                await Task.Delay(8_000, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch
+            {
+                await Task.Delay(8_000, cancellationToken);
+            }
+        }
+    }
+
+    private Task ReportTrafficUpdateAsync(string sessionId, long bytes, CancellationToken cancellationToken) =>
+        _eventReporter.ReportAsync(new SessionEvent
+        {
+            SessionId = sessionId,
+            Type = SessionEventType.TrafficUpdated,
+            TrafficBytes = bytes,
+            Message = SessionTrafficMonitor.FormatBytes(bytes)
+        }, cancellationToken);
+
     private async Task RunStepAsync(
         string sessionId,
+        string profileId,
         int step,
         string stepName,
         CancellationToken cancellationToken,
         Func<Task> action)
     {
+        await _pauseCoordinator.WaitIfPausedAsync(profileId, sessionId, _eventReporter, cancellationToken);
+
         await _eventReporter.ReportAsync(new SessionEvent
         {
             SessionId = sessionId,
@@ -338,6 +505,8 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
         await ReportStatusAsync(sessionId, SessionStatus.Running, cancellationToken);
 
         await action();
+
+        await _pauseCoordinator.WaitIfPausedAsync(profileId, sessionId, _eventReporter, cancellationToken);
 
         if (cancellationToken.IsCancellationRequested)
             throw new OperationCanceledException();

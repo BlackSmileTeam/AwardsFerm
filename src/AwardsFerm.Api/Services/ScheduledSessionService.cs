@@ -61,7 +61,7 @@ public sealed class ScheduledSessionService : BackgroundService
                 continue;
 
             var active = _sessionManager.GetByProfileId(slot.ProfileId);
-            if (active?.Status is SessionStatus.Starting or SessionStatus.Running)
+            if (active?.Status is SessionStatus.Starting or SessionStatus.Running or SessionStatus.Paused)
                 continue;
 
             try
@@ -72,7 +72,11 @@ public sealed class ScheduledSessionService : BackgroundService
                     ProfileId = slot.ProfileId,
                     StopAtMsk = slot.StopAtMsk,
                     AutoRestart = slot.AutoRestart,
-                    Options = new YandexGamesSearchOptions { Headless = false }
+                    Options = new YandexGamesSearchOptions
+                    {
+                        Headless = false,
+                        UseProxy = slot.ProxyEnabled
+                    }
                 }, cancellationToken);
 
                 _lastTriggered[slot.ProfileId] = today;

@@ -12,6 +12,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<SessionSlotEntity> SessionSlots => Set<SessionSlotEntity>();
     public DbSet<SessionRunEntity> SessionRuns => Set<SessionRunEntity>();
     public DbSet<RsyaSnapshotEntity> RsyaSnapshots => Set<RsyaSnapshotEntity>();
+    public DbSet<SessionIpAuditEntity> SessionIpAudits => Set<SessionIpAuditEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -65,6 +66,17 @@ public sealed class AppDbContext : DbContext
             b.HasKey(x => x.Id);
             b.HasIndex(x => new { x.AdAccountId, x.CapturedAt });
             b.HasOne(x => x.AdAccount).WithMany(x => x.RsyaSnapshots).HasForeignKey(x => x.AdAccountId);
+        });
+
+        modelBuilder.Entity<SessionIpAuditEntity>(b =>
+        {
+            b.ToTable("session_ip_audits");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.RuntimeSessionId).HasMaxLength(64).IsRequired();
+            b.Property(x => x.ProfileId).HasMaxLength(64).IsRequired();
+            b.Property(x => x.PublicIp).HasMaxLength(64).IsRequired();
+            b.HasIndex(x => new { x.RuntimeSessionId, x.CapturedAt });
+            b.HasIndex(x => new { x.AdAccountId, x.CapturedAt });
         });
     }
 }

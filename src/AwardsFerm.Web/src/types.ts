@@ -5,16 +5,21 @@ export type SessionStatus =
   | 'Completed'
   | 'Failed'
   | 'Stopped'
+  | 'Paused'
 
 export interface SessionInfo {
   id: string
+  adAccountId?: number
   profileId: string
+  stopAtMsk?: string | null
   autoRestart: boolean
   status: SessionStatus
   currentStep: number
   totalSteps: number
   currentStepName: string
   errorMessage?: string
+  publicIp?: string
+  trafficBytes?: number
   startedAt?: string
   finishedAt?: string
   logs: string[]
@@ -25,6 +30,8 @@ export type SessionEventType =
   | 'StepChanged'
   | 'Screenshot'
   | 'StatusChanged'
+  | 'IpDetected'
+  | 'TrafficUpdated'
   | 'Completed'
   | 'Failed'
 
@@ -36,56 +43,60 @@ export interface SessionEvent {
   totalSteps?: number
   stepName?: string
   status?: SessionStatus
+  publicIp?: string
+  trafficBytes?: number
   screenshotBase64?: string
   timestamp: string
 }
 
 export interface SessionSlotConfig {
+  id?: number
+  adAccountId?: number
   profileId: string
   label: string
   scheduleEnabled: boolean
   scheduledStartMsk?: string | null
+  stopAtMsk?: string | null
+  autoRestart?: boolean
+  proxyEnabled?: boolean
 }
-
-export const DEFAULT_SESSION_SLOTS: SessionSlotConfig[] = [
-  { profileId: 'session-001', label: 'Сессия 1', scheduleEnabled: false },
-  { profileId: 'session-002', label: 'Сессия 2', scheduleEnabled: false },
-]
 
 export interface SlotState {
   session: SessionInfo | null
   logs: string[]
-  screenshot: string | null
   loading: boolean
 }
 
-export interface RsyaPeriodStats {
-  reward: number
-  shows: number
-  clicks: number
-  hits: number
-  fillRate?: number
+export interface AdAccount {
+  id: number
+  name: string
+  gameTitle: string
+  gameUrl: string
+  todayReward?: number
+  monthReward?: number
+  createdAt: string
 }
 
-export interface RsyaDailyPoint {
-  date: string
-  reward: number
-  shows: number
-  clicks: number
+export interface CreateAdAccountRequest {
+  name: string
+  gameTitle: string
+  gameUrl: string
+  token: string
 }
 
-export interface RsyaDashboard {
-  configured: boolean
-  error?: string
-  currency: string
-  reportTitle?: string
-  today: RsyaPeriodStats
-  yesterday: RsyaPeriodStats
-  thisMonth: RsyaPeriodStats
-  dailyChart: RsyaDailyPoint[]
-  updatedAt: string
+export interface UpdateAdAccountRequest {
+  name?: string
+  gameTitle?: string
+  gameUrl?: string
+  token?: string
+}
+
+export interface UserProfitSummary {
+  totalTodayReward: number
+  totalMonthReward: number
+  accounts: AdAccount[]
 }
 
 export function createEmptySlotState(): SlotState {
-  return { session: null, logs: [], screenshot: null, loading: false }
+  return { session: null, logs: [], loading: false }
 }

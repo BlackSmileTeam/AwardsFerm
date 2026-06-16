@@ -6,6 +6,8 @@ public enum SessionEventType
     StepChanged,
     Screenshot,
     StatusChanged,
+    IpDetected,
+    TrafficUpdated,
     Completed,
     Failed
 }
@@ -19,6 +21,8 @@ public sealed class SessionEvent
     public int? TotalSteps { get; set; }
     public string? StepName { get; set; }
     public SessionStatus? Status { get; set; }
+    public string? PublicIp { get; set; }
+    public long? TrafficBytes { get; set; }
     public string? ScreenshotBase64 { get; set; }
     public DateTimeOffset Timestamp { get; set; } = DateTimeOffset.UtcNow;
 }

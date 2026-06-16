@@ -5,14 +5,16 @@ namespace AwardsFerm.Api.Services;
 public sealed class SessionManager
 {
     private readonly SessionSlotStore _slotStore;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly object _lock = new();
     private readonly Dictionary<string, SessionInfo> _sessions = new();
     private readonly Dictionary<string, CancellationTokenSource> _ctsBySession = new();
     private readonly Dictionary<string, string> _profileToSession = new();
 
-    public SessionManager(SessionSlotStore slotStore)
+    public SessionManager(SessionSlotStore slotStore, IServiceScopeFactory scopeFactory)
     {
         _slotStore = slotStore;
+        _scopeFactory = scopeFactory;
     }
 
     public int MaxConcurrentSessions => Math.Max(1, _slotStore.Count);
@@ -54,7 +56,7 @@ public sealed class SessionManager
         }
     }
 
-    public SessionInfo StartSession(StartSessionRequest request)
+    public SessionInfo StartSession(StartSessionRequest request, string? sessionId = null)
     {
         var profileId = string.IsNullOrWhiteSpace(request.ProfileId) ? "session-001" : request.ProfileId.Trim();
         var adAccountId = request.AdAccountId;
@@ -66,18 +68,26 @@ public sealed class SessionManager
 
             if (_profileToSession.TryGetValue(profileId, out var existingId)
                 && _sessions.TryGetValue(existingId, out var existing)
-                && existing.Status is SessionStatus.Starting or SessionStatus.Running)
+                && existing.Status is SessionStatus.Starting or SessionStatus.Running or SessionStatus.Paused)
             {
                 throw new InvalidOperationException($"Профиль {profileId} уже выполняется.");
             }
 
-            var activeCount = _sessions.Values.Count(s => s.Status is SessionStatus.Starting or SessionStatus.Running);
+            // Устаревшая привязка после остановки — не блокирует новый старт.
+            if (_profileToSession.TryGetValue(profileId, out var staleId)
+                && _sessions.TryGetValue(staleId, out var stale)
+                && stale.Status is not (SessionStatus.Starting or SessionStatus.Running))
+            {
+                _profileToSession.Remove(profileId);
+            }
+
+            var activeCount = _sessions.Values.Count(s => s.Status is SessionStatus.Starting or SessionStatus.Running or SessionStatus.Paused);
             if (activeCount >= MaxConcurrentSessions)
                 throw new InvalidOperationException($"Достигнут лимит параллельных сессий ({MaxConcurrentSessions}).");
 
             var session = new SessionInfo
             {
-                Id = Guid.NewGuid().ToString("N"),
+                Id = string.IsNullOrWhiteSpace(sessionId) ? Guid.NewGuid().ToString("N") : sessionId,
                 AdAccountId = adAccountId,
                 ProfileId = profileId,
                 AutoRestart = request.AutoRestart ?? true,
@@ -138,6 +148,38 @@ public sealed class SessionManager
         }
     }
 
+    public void PauseSession(string profileId)
+    {
+        lock (_lock)
+        {
+            if (!_profileToSession.TryGetValue(profileId, out var sessionId)
+                || !_sessions.TryGetValue(sessionId, out var session))
+                return;
+
+            if (session.Status is not (SessionStatus.Starting or SessionStatus.Running))
+                return;
+
+            session.Status = SessionStatus.Paused;
+            session.Logs.Add($"[{DateTimeOffset.UtcNow:HH:mm:ss}] Пауза");
+        }
+    }
+
+    public void ResumeSession(string profileId)
+    {
+        lock (_lock)
+        {
+            if (!_profileToSession.TryGetValue(profileId, out var sessionId)
+                || !_sessions.TryGetValue(sessionId, out var session))
+                return;
+
+            if (session.Status is not SessionStatus.Paused)
+                return;
+
+            session.Status = SessionStatus.Running;
+            session.Logs.Add($"[{DateTimeOffset.UtcNow:HH:mm:ss}] Продолжение");
+        }
+    }
+
     public void StopByProfileId(string profileId)
     {
         lock (_lock)
@@ -170,6 +212,16 @@ public sealed class SessionManager
                     break;
                 case SessionEventType.StatusChanged when sessionEvent.Status is not null:
                     session.Status = sessionEvent.Status.Value;
+                    if (sessionEvent.Message is not null)
+                        session.Logs.Add($"[{sessionEvent.Timestamp:HH:mm:ss}] {sessionEvent.Message}");
+                    break;
+                case SessionEventType.IpDetected when !string.IsNullOrWhiteSpace(sessionEvent.PublicIp):
+                    session.PublicIp = sessionEvent.PublicIp;
+                    session.Logs.Add($"[{sessionEvent.Timestamp:HH:mm:ss}] Текущий IP: {sessionEvent.PublicIp}");
+                    SaveIpAudit(session, sessionEvent.PublicIp!);
+                    break;
+                case SessionEventType.TrafficUpdated when sessionEvent.TrafficBytes is >= 0:
+                    session.TrafficBytes = sessionEvent.TrafficBytes.Value;
                     break;
                 case SessionEventType.Completed:
                     if (!session.AutoRestart)
@@ -218,8 +270,31 @@ public sealed class SessionManager
         TotalSteps = source.TotalSteps,
         CurrentStepName = source.CurrentStepName,
         ErrorMessage = source.ErrorMessage,
+        PublicIp = source.PublicIp,
+        TrafficBytes = source.TrafficBytes,
         StartedAt = source.StartedAt,
         FinishedAt = source.FinishedAt,
         Logs = [..source.Logs]
     };
+
+    private void SaveIpAudit(SessionInfo session, string publicIp)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<Data.AppDbContext>();
+            db.SessionIpAudits.Add(new Data.Entities.SessionIpAuditEntity
+            {
+                RuntimeSessionId = session.Id,
+                AdAccountId = session.AdAccountId,
+                ProfileId = session.ProfileId,
+                PublicIp = publicIp
+            });
+            db.SaveChanges();
+        }
+        catch
+        {
+            // do not break runtime flow on audit write failures
+        }
+    }
 }

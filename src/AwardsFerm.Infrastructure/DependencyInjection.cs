@@ -16,6 +16,7 @@ public static class DependencyInjection
         services.AddSingleton<IProfileRepository>(sp => sp.GetRequiredService<ProfileRepository>());
         services.AddSingleton<ICookieStore, CookieStore>();
         services.AddSingleton<PlaywrightBrowserFactory>();
+        services.AddSingleton<ISessionPauseCoordinator, SessionPauseCoordinator>();
         services.AddSingleton<IBrowserSessionRunner, BrowserSessionRunner>();
         return services;
     }

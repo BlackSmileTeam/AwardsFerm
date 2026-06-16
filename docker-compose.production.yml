@@ -8,8 +8,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       Api__BaseUrl: http://api:8080
-      BROWSER_HEADLESS: "false"
-      DISPLAY: ":99"
+      BROWSER_HEADLESS: ${BROWSER_HEADLESS:-true}
       RSYA_OAUTH_TOKEN: ${RSYA_OAUTH_TOKEN:-}
     volumes:
       - ./profiles:/app/profiles
@@ -35,7 +34,11 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       Worker__BaseUrl: http://worker:8081
+      SQLITE_DB_PATH: /var/lib/awardsferm/awardsferm.db
+      Auth__JwtSecret: ${JWT_SECRET:?Set JWT_SECRET in .env.production}
       YandexRsya__OAuthToken: ${RSYA_OAUTH_TOKEN:-}
+    volumes:
+      - awardsferm-data:/var/lib/awardsferm
     expose:
       - "8080"
     ports:
@@ -58,6 +61,9 @@ services:
       - "${FRONTEND_PORT:-55502}:80"
     networks:
       - awardsferm
+
+volumes:
+  awardsferm-data:
 
 networks:
   awardsferm:

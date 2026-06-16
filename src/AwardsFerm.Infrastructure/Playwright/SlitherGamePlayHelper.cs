@@ -19,7 +19,7 @@ internal static class SlitherGamePlayHelper
     private sealed class GameOverAdState
     {
         public int SinceAd;
-        public int UntilNextAd = Random.Shared.Next(2, 5);
+        public int UntilNextAd = Random.Shared.Next(1, 4);
     }
 
     private static readonly Random Random = new();
@@ -56,10 +56,12 @@ internal static class SlitherGamePlayHelper
     public static async Task<PlaySessionOutcome> PlaySessionAsync(
         IBrowserContext context,
         IPage page,
+        string profileId,
         int minSeconds,
         int maxSeconds,
         string sessionId,
         ISessionEventReporter reporter,
+        ISessionPauseCoordinator pauseCoordinator,
         CancellationToken cancellationToken = default)
     {
         _ = minSeconds;
@@ -79,6 +81,8 @@ internal static class SlitherGamePlayHelper
 
         while (!cancellationToken.IsCancellationRequested)
         {
+            await pauseCoordinator.WaitIfPausedAsync(profileId, sessionId, reporter, cancellationToken);
+
             if (page.IsClosed)
                 throw new PlaywrightException("Target closed");
 
@@ -114,7 +118,7 @@ internal static class SlitherGamePlayHelper
 
             var chunkSeconds = Random.Next(20, 35);
             var stoppedByGameOver = await SlitherChunkAsync(
-                context, page, chunkSeconds, sessionId, reporter, cancellationToken);
+                context, page, profileId, chunkSeconds, sessionId, reporter, pauseCoordinator, cancellationToken);
             if (stoppedByGameOver)
             {
                 var (rotate, _, count) = await ProcessGameOverAsync(
@@ -171,7 +175,7 @@ internal static class SlitherGamePlayHelper
         if (adState.SinceAd >= adState.UntilNextAd)
         {
             adState.SinceAd = 0;
-            adState.UntilNextAd = Random.Next(2, 5);
+            adState.UntilNextAd = Random.Next(1, 4);
             await LogAsync(sessionId, reporter,
                 $"После поражения — смотрим боковую рекламу (следующий раз через {adState.UntilNextAd} поражений)…",
                 cancellationToken);
@@ -216,9 +220,11 @@ internal static class SlitherGamePlayHelper
     private static async Task<bool> SlitherChunkAsync(
         IBrowserContext context,
         IPage page,
+        string profileId,
         int seconds,
         string sessionId,
         ISessionEventReporter reporter,
+        ISessionPauseCoordinator pauseCoordinator,
         CancellationToken cancellationToken)
     {
         var deadline = DateTimeOffset.UtcNow.AddSeconds(seconds);
@@ -227,12 +233,15 @@ internal static class SlitherGamePlayHelper
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            await pauseCoordinator.WaitIfPausedAsync(profileId, sessionId, reporter, cancellationToken);
             if (page.IsClosed)
                 return false;
 
             if (++checks % 8 == 0)
             {
-                await CaptchaHelper.TryAutoSolveAsync(page, cancellationToken);
+                if (await CaptchaHelper.IsPresentAsync(page))
+                    await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, reporter, cancellationToken);
+
                 if (await IsGameOverVisibleAsync(page))
                     return true;
             }

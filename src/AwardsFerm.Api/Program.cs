@@ -74,7 +74,12 @@ builder.Services.AddSingleton<JwtTokenService>();
 
 builder.Services.AddHttpClient("worker", client =>
 {
-    client.Timeout = TimeSpan.FromSeconds(30);
+    client.Timeout = TimeSpan.FromSeconds(120);
+});
+
+builder.Services.AddHttpClient("worker-quick", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(5);
 });
 
 builder.Services.AddCors(options =>

@@ -1,4 +1,5 @@
 # Один прокси на строку. При каждом перезапуске сессии выбирается следующий из списка.
+# Логин и пароль от провайдера — в profiles/proxy.auth.json (см. proxy.auth.json.example).
 # IP и геолокация (координаты, часовой пояс, locale) подстраиваются под прокси.
 #
 # Расширенный формат (рекомендуется):
@@ -8,5 +9,10 @@
 # socks5://host:port | 55.75 | 37.62 | Europe/Moscow | ru-RU | Москва
 #
 # Короткий формат (гео по встроенному каталогу host:port):
-# http://user:pass@host:port
+# http://host:port
 # socks5://host:port
+#
+# Proxy.Market: credentials и apiKey в proxy.auth.json, здесь только host:port и гео:
+# http://pool.proxy.market:10000 | 55.75 | 37.62 | Europe/Moscow | ru-RU | Россия
+# session-001 → :10000, session-002 → :10001
+# apiKey в proxy.auth.json — Worker синхронизирует login/password из пакета трафика

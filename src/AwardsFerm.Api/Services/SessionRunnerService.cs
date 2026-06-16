@@ -34,16 +34,28 @@ public sealed class SessionRunnerService
             {
                 request.StopAtMsk ??= slot.StopAtMsk;
                 request.AutoRestart ??= slot.AutoRestart;
+                request.Options.UseProxy = slot.ProxyEnabled;
             }
         }
 
-        var session = _sessionManager.StartSession(request);
-        var workerUrl = _configuration["Worker:BaseUrl"] ?? "http://localhost:8081";
+        var profileId = string.IsNullOrWhiteSpace(request.ProfileId) ? "session-001" : request.ProfileId.Trim();
+
+        if (!await IsWorkerHealthyAsync(cancellationToken))
+        {
+            throw new InvalidOperationException(
+                "Worker не запущен. Сначала выполните в отдельном терминале: " +
+                "dotnet run --project src\\AwardsFerm.Worker\\AwardsFerm.Worker.csproj");
+        }
+
+        await EnsureWorkerStoppedAsync(profileId);
+
+        var sessionId = Guid.NewGuid().ToString("N");
+        var workerUrl = GetWorkerBaseUrl();
         var payload = new WorkerRunRequest
         {
-            SessionId = session.Id,
-            ProfileId = session.ProfileId,
-            AutoRestart = session.AutoRestart,
+            SessionId = sessionId,
+            ProfileId = profileId,
+            AutoRestart = request.AutoRestart ?? true,
             Options = request.Options
         };
 
@@ -53,7 +65,6 @@ public sealed class SessionRunnerService
             var response = await client.PostAsJsonAsync($"{workerUrl}/internal/run", payload, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                _sessionManager.StopSession(session.Id);
                 var body = await response.Content.ReadAsStringAsync(cancellationToken);
                 throw new InvalidOperationException(
                     string.IsNullOrWhiteSpace(body) ? "Worker не смог запустить сессию." : body);
@@ -61,8 +72,18 @@ public sealed class SessionRunnerService
         }
         catch (Exception ex) when (ex is not InvalidOperationException)
         {
-            _sessionManager.StopSession(session.Id);
             throw new InvalidOperationException($"Worker недоступен: {ex.Message}", ex);
+        }
+
+        SessionInfo session;
+        try
+        {
+            session = _sessionManager.StartSession(request, sessionId);
+        }
+        catch
+        {
+            await EnsureWorkerStoppedAsync(profileId, useLongTimeout: true);
+            throw;
         }
 
         _logger.LogInformation("Сессия {SessionId} запущена для {ProfileId}", session.Id, session.ProfileId);
@@ -73,16 +94,77 @@ public sealed class SessionRunnerService
     public async Task StopProfileAsync(string profileId, CancellationToken cancellationToken = default)
     {
         var session = _sessionManager.GetByProfileId(profileId);
+        if (session is not null)
+            _sessionManager.StopSession(session.Id);
+        else
+            _sessionManager.StopByProfileId(profileId);
+
+        if (await IsWorkerHealthyAsync(cancellationToken))
+            await EnsureWorkerStoppedAsync(profileId, useLongTimeout: true, cancellationToken);
+    }
+
+    public async Task PauseProfileAsync(string profileId, CancellationToken cancellationToken = default)
+    {
+        var session = _sessionManager.GetByProfileId(profileId);
         if (session is null)
-            return;
+            throw new InvalidOperationException("Сессия не найдена.");
+        if (session.Status is not (SessionStatus.Starting or SessionStatus.Running))
+            throw new InvalidOperationException("Пауза доступна только для активной сессии.");
 
-        _sessionManager.StopSession(session.Id);
+        if (!await IsWorkerHealthyAsync(cancellationToken))
+            throw new InvalidOperationException("Worker не запущен.");
 
-        var workerUrl = _configuration["Worker:BaseUrl"] ?? "http://localhost:8081";
+        var client = _httpClientFactory.CreateClient("worker-quick");
+        await client.PostAsync($"{GetWorkerBaseUrl()}/internal/pause/{profileId}", null, cancellationToken);
+        _sessionManager.PauseSession(profileId);
+    }
+
+    public async Task ResumeProfileAsync(string profileId, CancellationToken cancellationToken = default)
+    {
+        var session = _sessionManager.GetByProfileId(profileId);
+        if (session is null)
+            throw new InvalidOperationException("Сессия не найдена.");
+        if (session.Status is not SessionStatus.Paused)
+            throw new InvalidOperationException("Сессия не на паузе.");
+
+        if (!await IsWorkerHealthyAsync(cancellationToken))
+            throw new InvalidOperationException("Worker не запущен.");
+
+        var client = _httpClientFactory.CreateClient("worker-quick");
+        await client.PostAsync($"{GetWorkerBaseUrl()}/internal/resume/{profileId}", null, cancellationToken);
+        _sessionManager.ResumeSession(profileId);
+    }
+
+    private string GetWorkerBaseUrl() =>
+        _configuration["Worker:BaseUrl"] ?? "http://localhost:8081";
+
+    private async Task<bool> IsWorkerHealthyAsync(CancellationToken cancellationToken)
+    {
         try
         {
-            var client = _httpClientFactory.CreateClient("worker");
-            await client.PostAsync($"{workerUrl}/internal/stop/{profileId}", null, cancellationToken);
+            var client = _httpClientFactory.CreateClient("worker-quick");
+            var response = await client.GetAsync($"{GetWorkerBaseUrl()}/health", cancellationToken);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Worker health check failed");
+            return false;
+        }
+    }
+
+    private Task EnsureWorkerStoppedAsync(string profileId, bool useLongTimeout = false, CancellationToken cancellationToken = default)
+    {
+        var clientName = useLongTimeout ? "worker" : "worker-quick";
+        return EnsureWorkerStoppedCoreAsync(profileId, clientName, cancellationToken);
+    }
+
+    private async Task EnsureWorkerStoppedCoreAsync(string profileId, string clientName, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var client = _httpClientFactory.CreateClient(clientName);
+            await client.PostAsync($"{GetWorkerBaseUrl()}/internal/stop/{profileId}", null, cancellationToken);
         }
         catch (Exception ex)
         {

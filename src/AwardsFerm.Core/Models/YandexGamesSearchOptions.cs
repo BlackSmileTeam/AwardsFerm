@@ -9,4 +9,7 @@ public sealed class YandexGamesSearchOptions
     public int PlayDurationMinSeconds { get; set; } = 120;
     public int PlayDurationMaxSeconds { get; set; } = 180;
     public bool Headless { get; set; }
+
+    /// <summary>Использовать прокси из profiles/proxies.txt и proxy.auth.json.</summary>
+    public bool UseProxy { get; set; } = true;
 }

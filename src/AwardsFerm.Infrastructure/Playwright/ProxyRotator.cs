@@ -35,6 +35,10 @@ internal static class ProxyRotator
     private static string? _cachePath;
     private static DateTime _cacheMtime = DateTime.MinValue;
     private static readonly Dictionary<string, int> RotationIndex = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, ProxyFailureInfo> ProxyFailures = new(StringComparer.OrdinalIgnoreCase);
+
+    private const int MaxFailuresBeforeBan = 2;
+    private static readonly TimeSpan FailureCooldown = TimeSpan.FromMinutes(20);
 
     private static readonly Dictionary<string, ProxyGeoLocation> KnownHosts = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -47,6 +51,8 @@ internal static class ProxyRotator
         ["157.245.100.190:442"] = new() { Latitude = 12.9716, Longitude = 77.5946, Timezone = "Asia/Kolkata", Locale = "en-IN", Label = "Бангалор, Индия" },
         ["109.71.246.44:1080"] = new() { Latitude = 55.7558, Longitude = 37.6173, Timezone = "Europe/Moscow", Locale = "ru-RU", Label = "Россия" },
         ["186.96.16.117:1080"] = new() { Latitude = 40.4168, Longitude = -3.7038, Timezone = "Europe/Madrid", Locale = "es-ES", Label = "Испания" },
+        ["pool.proxy.market:10000"] = new() { Latitude = 59.9343, Longitude = 30.3351, Timezone = "Europe/Moscow", Locale = "ru-RU", Label = "Санкт-Петербург, Beeline" },
+        ["tproxy.pro:39834"] = new() { Latitude = 55.7558, Longitude = 37.6173, Timezone = "Europe/Moscow", Locale = "ru-RU", Label = "Россия, Beeline (tproxy)" },
     };
 
     public static string? PickNext(string profilesRoot) => PickForProfile(profilesRoot, null)?.Url;
@@ -57,11 +63,93 @@ internal static class ProxyRotator
         if (proxies.Length == 0)
             return null;
 
+        var healthy = FilterBannedProxies(proxies);
+        if (healthy.Length == 0)
+            healthy = proxies;
+
         if (string.IsNullOrWhiteSpace(profileId))
-            return proxies[Random.Next(proxies.Length)];
+            return healthy[Random.Next(healthy.Length)];
 
         var index = GetAndIncrementRotationIndex(profileId);
-        return proxies[index % proxies.Length];
+        return healthy[index % healthy.Length];
+    }
+
+    public static void ReportFailure(string? proxyUrl)
+    {
+        if (string.IsNullOrWhiteSpace(proxyUrl))
+            return;
+
+        var key = ExtractHostKey(proxyUrl);
+        if (key is null)
+            return;
+
+        lock (Lock)
+        {
+            if (!ProxyFailures.TryGetValue(key, out var info))
+                info = new ProxyFailureInfo();
+
+            info.Count++;
+            info.LastFailureUtc = DateTime.UtcNow;
+            ProxyFailures[key] = info;
+        }
+    }
+
+    public static void ReportSuccess(string? proxyUrl)
+    {
+        if (string.IsNullOrWhiteSpace(proxyUrl))
+            return;
+
+        var key = ExtractHostKey(proxyUrl);
+        if (key is null)
+            return;
+
+        lock (Lock)
+        {
+            ProxyFailures.Remove(key);
+        }
+    }
+
+    public static void InvalidateCache()
+    {
+        lock (Lock)
+        {
+            _cacheMtime = DateTime.MinValue;
+            _cache = [];
+        }
+    }
+
+    private static ProxyEntry[] FilterBannedProxies(ProxyEntry[] proxies)
+    {
+        lock (Lock)
+        {
+            if (ProxyFailures.Count == 0)
+                return proxies;
+
+            var now = DateTime.UtcNow;
+            var healthy = new List<ProxyEntry>(proxies.Length);
+            foreach (var p in proxies)
+            {
+                var key = ExtractHostKey(p.Url);
+                if (key is null)
+                {
+                    healthy.Add(p);
+                    continue;
+                }
+
+                if (!ProxyFailures.TryGetValue(key, out var info))
+                {
+                    healthy.Add(p);
+                    continue;
+                }
+
+                var cooldownExpired = (now - info.LastFailureUtc) > FailureCooldown;
+                var banned = info.Count >= MaxFailuresBeforeBan && !cooldownExpired;
+                if (!banned)
+                    healthy.Add(p);
+            }
+
+            return [..healthy];
+        }
     }
 
     public static ProxyGeoLocation ResolveGeo(string? proxyUrl, ProxyGeoLocation? inlineGeo = null)
@@ -110,31 +198,60 @@ internal static class ProxyRotator
         lock (Lock)
         {
             var mtime = File.Exists(path) ? File.GetLastWriteTimeUtc(path) : DateTime.MinValue;
-            if (_cachePath != path || mtime != _cacheMtime)
-            {
-                _cachePath = path;
+            var authMtime = File.Exists(Path.Combine(profilesRoot, "proxy.auth.json"))
+                ? File.GetLastWriteTimeUtc(Path.Combine(profilesRoot, "proxy.auth.json"))
+                : DateTime.MinValue;
+            var cacheKey = $"{path}|{mtime.Ticks}|{authMtime.Ticks}";
+
+            if (_cachePath == cacheKey)
+                return _cache;
+
+            _cachePath = cacheKey;
                 _cacheMtime = mtime;
-                _cache = File.Exists(path)
+
+                var entries = File.Exists(path)
                     ? File.ReadAllLines(path)
-                        .Select(ParseLine)
+                        .Select(line => ParseLine(profilesRoot, line))
                         .Where(e => e is not null)
                         .Cast<ProxyEntry>()
-                        .ToArray()
+                        .ToList()
                     : [];
-            }
+
+                if (entries.Count == 0)
+                {
+                    var authOnly = BuildFromAuthOnly(profilesRoot);
+                    if (authOnly is not null)
+                        entries.Add(authOnly);
+                }
+
+                _cache = entries.ToArray();
         }
 
         return _cache;
     }
 
-    private static ProxyEntry? ParseLine(string line)
+    private static ProxyEntry? BuildFromAuthOnly(string profilesRoot)
+    {
+        var auth = ProxyAuthStore.Load(profilesRoot);
+        if (auth is null)
+            return null;
+
+        var url = ProxyAuthStore.Apply(profilesRoot, $"{auth.Scheme}://{auth.Host}:{auth.Port}");
+        return new ProxyEntry
+        {
+            Url = url,
+            Geo = ResolveGeo(url, null)
+        };
+    }
+
+    private static ProxyEntry? ParseLine(string profilesRoot, string line)
     {
         var trimmed = line.Trim();
         if (trimmed.Length == 0 || trimmed.StartsWith('#'))
             return null;
 
         var parts = trimmed.Split('|', StringSplitOptions.TrimEntries);
-        var url = parts[0];
+        var url = ProxyAuthStore.Apply(profilesRoot, parts[0]);
         if (string.IsNullOrWhiteSpace(url) || !url.Contains("://", StringComparison.Ordinal))
             return null;
 
@@ -168,5 +285,11 @@ internal static class ProxyRotator
         {
             return null;
         }
+    }
+
+    private sealed class ProxyFailureInfo
+    {
+        public int Count { get; set; }
+        public DateTime LastFailureUtc { get; set; } = DateTime.MinValue;
     }
 }

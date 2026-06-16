@@ -12,6 +12,7 @@ public sealed class SessionSlotEntity
     public string? ScheduledStartMsk { get; set; }
     public string? StopAtMsk { get; set; }
     public bool AutoRestart { get; set; } = true;
+    public bool ProxyEnabled { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public List<SessionRunEntity> Runs { get; set; } = [];

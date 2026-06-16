@@ -34,12 +34,14 @@ public sealed class PlaywrightBrowserFactory
         Directory.CreateDirectory(userDataDir);
 
         var windowPosition = ResolveWindowPosition(profile.Id);
+        var isMobileLike = profile.FormFactor != DeviceFormFactor.Desktop;
+        var viewport = new ViewportSize { Width = profile.ViewportWidth, Height = profile.ViewportHeight };
 
         var launchOptions = new BrowserTypeLaunchPersistentContextOptions
         {
             Headless = options.Headless,
             UserAgent = profile.UserAgent,
-            ViewportSize = new ViewportSize { Width = profile.ViewportWidth, Height = profile.ViewportHeight },
+            ViewportSize = viewport,
             Locale = profile.Locale,
             TimezoneId = profile.Timezone,
             Geolocation = new Geolocation
@@ -50,25 +52,42 @@ public sealed class PlaywrightBrowserFactory
             Permissions = ["geolocation"],
             ColorScheme = ColorScheme.Light,
             DeviceScaleFactor = (float)profile.DeviceScaleFactor,
+            // CDP mobile=true на десктопном Chrome вызывает скачки масштаба; layout задаёт UA + viewport + touch.
+            IsMobile = false,
+            HasTouch = isMobileLike,
             SlowMo = 50,
-            Args =
-            [
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-                $"--window-size={profile.ViewportWidth},{profile.ViewportHeight}",
-                $"--window-position={windowPosition.X},{windowPosition.Y}",
-                $"--lang={profile.Locale}",
-                "--no-first-run",
-                "--no-default-browser-check"
-            ],
+            Args = BuildChromeArgs(profile, windowPosition),
             ExtraHTTPHeaders = new Dictionary<string, string>
             {
                 ["Accept-Language"] = BuildAcceptLanguage(profile.Locale)
             }
         };
 
+        if (isMobileLike)
+        {
+            launchOptions.ScreenSize = new ScreenSize
+            {
+                Width = profile.ViewportWidth,
+                Height = profile.ViewportHeight
+            };
+        }
+
         if (!string.IsNullOrWhiteSpace(profile.ProxyUrl))
-            launchOptions.Proxy = new Proxy { Server = profile.ProxyUrl };
+        {
+            if (ProxyUrlHelper.TryParseProxy(profile.ProxyUrl, out var creds))
+            {
+                launchOptions.Proxy = new Proxy
+                {
+                    Server = creds.Server,
+                    Username = creds.Username,
+                    Password = creds.Password
+                };
+            }
+            else
+            {
+                launchOptions.Proxy = new Proxy { Server = profile.ProxyUrl };
+            }
+        }
 
         IBrowserContext context;
         try
@@ -85,6 +104,7 @@ public sealed class PlaywrightBrowserFactory
         await context.AddInitScriptAsync(StealthScripts.BuildInitScript(profile));
 
         var page = context.Pages.Count > 0 ? context.Pages[0] : await context.NewPageAsync();
+        await StabilizeViewportAsync(context, page, profile);
 
         return new BrowserLaunchResult
         {
@@ -92,6 +112,65 @@ public sealed class PlaywrightBrowserFactory
             Context = context,
             Page = page
         };
+    }
+
+    private static string[] BuildChromeArgs(DesktopProfile profile, (int X, int Y) windowPosition)
+    {
+        if (profile.FormFactor == DeviceFormFactor.Desktop)
+        {
+            return
+            [
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                $"--window-size={profile.ViewportWidth},{profile.ViewportHeight}",
+                $"--window-position={windowPosition.X},{windowPosition.Y}",
+                $"--lang={profile.Locale}",
+                "--no-first-run",
+                "--no-default-browser-check"
+            ];
+        }
+
+        var chromeChrome = profile.FormFactor == DeviceFormFactor.Phone ? 110 : 90;
+        return
+        [
+            "--disable-blink-features=AutomationControlled",
+            "--disable-infobars",
+            $"--window-size={profile.ViewportWidth},{profile.ViewportHeight + chromeChrome}",
+            $"--window-position={windowPosition.X},{windowPosition.Y}",
+            $"--lang={profile.Locale}",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-features=TranslateUI"
+        ];
+    }
+
+    private static async Task StabilizeViewportAsync(IBrowserContext context, IPage page, DesktopProfile profile)
+    {
+        if (profile.FormFactor == DeviceFormFactor.Desktop)
+            return;
+
+        try
+        {
+            var cdp = await context.NewCDPSessionAsync(page);
+            await cdp.SendAsync("Emulation.setDeviceMetricsOverride", new Dictionary<string, object>
+            {
+                ["width"] = profile.ViewportWidth,
+                ["height"] = profile.ViewportHeight,
+                ["deviceScaleFactor"] = profile.DeviceScaleFactor,
+                ["mobile"] = false,
+                ["screenWidth"] = profile.ViewportWidth,
+                ["screenHeight"] = profile.ViewportHeight
+            });
+            await cdp.SendAsync("Emulation.setTouchEmulationEnabled", new Dictionary<string, object>
+            {
+                ["enabled"] = true,
+                ["maxTouchPoints"] = profile.MaxTouchPoints
+            });
+        }
+        catch
+        {
+            // best-effort
+        }
     }
 
     private static (int X, int Y) ResolveWindowPosition(string profileId)

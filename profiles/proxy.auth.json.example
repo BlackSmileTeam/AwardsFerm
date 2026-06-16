@@ -1,0 +1,11 @@
+{
+  "host": "pool.proxy.market",
+  "port": 10000,
+  "scheme": "http",
+  "login": "YOUR_LOGIN_FROM_PROXY_MARKET",
+  "password": "YOUR_PASSWORD_FROM_PROXY_MARKET",
+  "apiKey": "YOUR_API_KEY_FROM_PROXY_MARKET_LK",
+  "packageId": 0,
+  "country": "ru",
+  "rotationMinutes": 10
+}

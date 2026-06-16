@@ -11,3 +11,9 @@ public sealed class LoginResponse
     public string Token { get; set; } = string.Empty;
     public string Login { get; set; } = string.Empty;
 }
+
+public sealed class ChangePasswordRequest
+{
+    public string CurrentPassword { get; set; } = string.Empty;
+    public string NewPassword { get; set; } = string.Empty;
+}

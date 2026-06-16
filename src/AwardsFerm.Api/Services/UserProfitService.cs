@@ -25,7 +25,7 @@ public sealed class UserProfitService
     {
         var accounts = await _db.AdAccounts
             .Where(x => x.UserId == userId)
-            .OrderBy(x => x.CreatedAt)
+            .OrderBy(x => x.Id)
             .ToListAsync(ct);
 
         var result = new List<AdAccountDto>(accounts.Count);

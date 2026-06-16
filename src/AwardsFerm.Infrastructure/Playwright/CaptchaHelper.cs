@@ -145,11 +145,40 @@ internal static class CaptchaHelper
         if (!await IsPresentAsync(page))
             return;
 
+        var pageUrl = page.Url;
+        var headless = ResolveHeadlessMode();
+
         await reporter.ReportAsync(new SessionEvent
         {
             SessionId = sessionId,
             Type = SessionEventType.Log,
-            Message = "Капча «Я не робот» — пробуем нажать галочку…"
+            Message = $"⚠ ВНИМАНИЕ: обнаружена капча «Я не робот» ({pageUrl})"
+        }, cancellationToken);
+
+        if (headless)
+        {
+            await reporter.ReportAsync(new SessionEvent
+            {
+                SessionId = sessionId,
+                Type = SessionEventType.Log,
+                Message = "⚠ Headless-режим: капчу вручную решить нельзя — пробуем автоклик"
+            }, cancellationToken);
+        }
+        else
+        {
+            await reporter.ReportAsync(new SessionEvent
+            {
+                SessionId = sessionId,
+                Type = SessionEventType.Log,
+                Message = "Если автоклик не сработает — решите капчу в окне браузера"
+            }, cancellationToken);
+        }
+
+        await reporter.ReportAsync(new SessionEvent
+        {
+            SessionId = sessionId,
+            Type = SessionEventType.Log,
+            Message = "Капча — пробуем нажать галочку…"
         }, cancellationToken);
 
         for (var attempt = 1; attempt <= 4; attempt++)
@@ -212,5 +241,14 @@ internal static class CaptchaHelper
 
         throw new InvalidOperationException(
             $"Капча не решена за {maxWaitMinutes} мин. Решите её в окне браузера и запустите сессию снова.");
+    }
+
+    private static bool ResolveHeadlessMode()
+    {
+        var envHeadless = Environment.GetEnvironmentVariable("BROWSER_HEADLESS");
+        if (string.IsNullOrEmpty(envHeadless))
+            return true;
+
+        return bool.TryParse(envHeadless, out var headless) && headless;
     }
 }

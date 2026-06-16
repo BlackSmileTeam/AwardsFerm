@@ -27,4 +27,9 @@ public sealed class DesktopProfile
     public string SessionMac { get; set; } = string.Empty;
     /// <summary>Уникальный идентификатор экземпляра браузера (отдельный user-data и cookies).</summary>
     public string BrowserSessionId { get; set; } = string.Empty;
+    public DeviceFormFactor FormFactor { get; set; } = DeviceFormFactor.Desktop;
+    public int MaxTouchPoints { get; set; }
+    /// <summary>Базовая точка для периодического смещения координат.</summary>
+    public double GeoAnchorLatitude { get; set; }
+    public double GeoAnchorLongitude { get; set; }
 }

@@ -23,7 +23,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       Api__BaseUrl: http://api:8080
-      BROWSER_HEADLESS: "false"
+      BROWSER_HEADLESS: ${BROWSER_HEADLESS:-true}
       DISPLAY: ":99"
     volumes:
       - ./profiles:/app/profiles

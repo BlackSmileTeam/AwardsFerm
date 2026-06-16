@@ -103,12 +103,56 @@ public sealed class SessionsController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("{sessionId}/pause")]
+    public async Task<IActionResult> PauseById(string sessionId, CancellationToken cancellationToken)
+    {
+        var session = _sessionManager.GetById(sessionId);
+        if (session is null)
+            return NotFound();
+        var userId = GetUserId();
+        if (session.AdAccountId is not null &&
+            !await _resolver.UserOwnsAccountAsync(userId, session.AdAccountId.Value, cancellationToken))
+            return Forbid();
+
+        try
+        {
+            await _runner.PauseProfileAsync(session.ProfileId, cancellationToken);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    [HttpPost("{sessionId}/resume")]
+    public async Task<IActionResult> ResumeById(string sessionId, CancellationToken cancellationToken)
+    {
+        var session = _sessionManager.GetById(sessionId);
+        if (session is null)
+            return NotFound();
+        var userId = GetUserId();
+        if (session.AdAccountId is not null &&
+            !await _resolver.UserOwnsAccountAsync(userId, session.AdAccountId.Value, cancellationToken))
+            return Forbid();
+
+        try
+        {
+            await _runner.ResumeProfileAsync(session.ProfileId, cancellationToken);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
     [HttpPost("stop")]
     public async Task<IActionResult> StopAll(CancellationToken cancellationToken)
     {
         var userId = GetUserId();
         foreach (var session in _sessionManager.GetAll()
-                     .Where(s => s.Status is SessionStatus.Starting or SessionStatus.Running))
+                     .Where(s => s.Status is SessionStatus.Starting or SessionStatus.Running or SessionStatus.Paused))
         {
             if (session.AdAccountId is not null &&
                 !await _resolver.UserOwnsAccountAsync(userId, session.AdAccountId.Value, cancellationToken))

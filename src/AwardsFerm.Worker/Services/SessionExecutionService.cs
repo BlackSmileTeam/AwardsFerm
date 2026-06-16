@@ -6,49 +6,142 @@ namespace AwardsFerm.Worker.Services;
 
 public sealed class SessionExecutionService
 {
+    private static readonly TimeSpan StopWaitTimeout = TimeSpan.FromSeconds(90);
+
     private readonly IBrowserSessionRunner _runner;
     private readonly IProfileRepository _profileRepository;
+    private readonly ISessionPauseCoordinator _pauseCoordinator;
     private readonly ILogger<SessionExecutionService> _logger;
-
     private readonly ConcurrentDictionary<string, ProfileExecution> _byProfile = new();
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
 
     public SessionExecutionService(
         IBrowserSessionRunner runner,
         IProfileRepository profileRepository,
+        ISessionPauseCoordinator pauseCoordinator,
         ILogger<SessionExecutionService> logger)
     {
         _runner = runner;
         _profileRepository = profileRepository;
+        _pauseCoordinator = pauseCoordinator;
         _logger = logger;
     }
 
-    public bool IsProfileRunning(string profileId) =>
-        _byProfile.TryGetValue(profileId, out var entry) && !entry.Task.IsCompleted;
-
-    public Task StartAsync(WorkerRunRequest request)
+    public bool IsProfileRunning(string profileId)
     {
-        if (_byProfile.TryGetValue(request.ProfileId, out var existing) && !existing.Task.IsCompleted)
-            throw new InvalidOperationException($"Профиль {request.ProfileId} уже выполняется.");
+        if (!_byProfile.TryGetValue(profileId, out var entry))
+            return false;
 
-        var cts = new CancellationTokenSource();
-        var execution = new ProfileExecution
+        if (entry.Task.IsCompleted)
         {
-            SessionId = request.SessionId,
-            ProfileId = request.ProfileId,
-            AutoRestart = request.AutoRestart,
-            Cts = cts
-        };
+            _byProfile.TryRemove(profileId, out _);
+            return false;
+        }
 
-        execution.Task = Task.Run(() => RunProfileLoopAsync(execution, request.Options), cts.Token);
-        _byProfile[request.ProfileId] = execution;
-
-        return Task.CompletedTask;
+        return true;
     }
 
-    public void Stop(string profileId)
+    public async Task StartAsync(WorkerRunRequest request, CancellationToken cancellationToken = default)
     {
-        if (_byProfile.TryGetValue(profileId, out var execution))
-            execution.Cts.Cancel();
+        var gate = _locks.GetOrAdd(request.ProfileId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            await StopExecutionAsync(request.ProfileId, cancellationToken);
+
+            if (IsProfileRunning(request.ProfileId))
+                throw new InvalidOperationException($"Профиль {request.ProfileId} уже выполняется.");
+
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var execution = new ProfileExecution
+            {
+                SessionId = request.SessionId,
+                ProfileId = request.ProfileId,
+                AutoRestart = request.AutoRestart,
+                Cts = cts
+            };
+
+            execution.Task = Task.Run(() => RunProfileLoopAsync(execution, request.Options), cts.Token);
+            _byProfile[request.ProfileId] = execution;
+            _pauseCoordinator.Clear(request.ProfileId);
+
+            _logger.LogInformation(
+                "Profile {ProfileId}: принят запуск (session {SessionId})",
+                request.ProfileId,
+                request.SessionId);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    public Task StopAsync(string profileId, CancellationToken cancellationToken = default)
+    {
+        _pauseCoordinator.Clear(profileId);
+        var gate = _locks.GetOrAdd(profileId, _ => new SemaphoreSlim(1, 1));
+        return StopWithGateAsync(profileId, gate, cancellationToken);
+    }
+
+    public void Pause(string profileId)
+    {
+        _pauseCoordinator.Pause(profileId);
+        _logger.LogInformation("Profile {ProfileId}: пауза", profileId);
+    }
+
+    public void Resume(string profileId)
+    {
+        _pauseCoordinator.Resume(profileId);
+        _logger.LogInformation("Profile {ProfileId}: продолжение", profileId);
+    }
+
+    private async Task StopWithGateAsync(string profileId, SemaphoreSlim gate, CancellationToken cancellationToken)
+    {
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            await StopExecutionAsync(profileId, cancellationToken);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task StopExecutionAsync(string profileId, CancellationToken cancellationToken)
+    {
+        if (!_byProfile.TryGetValue(profileId, out var execution))
+            return;
+
+        if (execution.Task.IsCompleted)
+        {
+            _byProfile.TryRemove(profileId, out _);
+            return;
+        }
+
+        execution.Cts.Cancel();
+        try
+        {
+            await execution.Task.WaitAsync(StopWaitTimeout, cancellationToken);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning("Profile {ProfileId}: остановка не завершилась за {Seconds} сек",
+                profileId, StopWaitTimeout.TotalSeconds);
+        }
+        catch (OperationCanceledException)
+        {
+            // expected on cancel
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Profile {ProfileId}: ошибка при ожидании остановки", profileId);
+        }
+        finally
+        {
+            if (execution.Task.IsCompleted)
+                _byProfile.TryRemove(profileId, out _);
+        }
     }
 
     private async Task RunProfileLoopAsync(ProfileExecution execution, YandexGamesSearchOptions options)

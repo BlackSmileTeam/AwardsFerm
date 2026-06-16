@@ -63,18 +63,23 @@ jobs:
             echo "==> Write .env.production"
             umask 077
             FE_PORT='${{ secrets.PROD_FRONTEND_PORT }}'
-            if [ -z "$FE_PORT" ]; then FE_PORT=55502; fi
+            if [ -z "$FE_PORT" ]; then FE_PORT=55504; fi
             API_PORT='${{ secrets.PROD_API_PORT }}'
-            if [ -z "$API_PORT" ]; then API_PORT=55501; fi
+            if [ -z "$API_PORT" ]; then API_PORT=55503; fi
+            JWT_SECRET='${{ secrets.JWT_SECRET }}'
+            if [ -z "$JWT_SECRET" ]; then JWT_SECRET=$(openssl rand -base64 48); fi
             {
               echo "FRONTEND_PORT=$FE_PORT"
               echo "API_PORT=$API_PORT"
+              echo "JWT_SECRET=$JWT_SECRET"
+              echo "BROWSER_HEADLESS=true"
               if [ -n '${{ secrets.RSYA_OAUTH_TOKEN }}' ]; then
                 echo "RSYA_OAUTH_TOKEN=${{ secrets.RSYA_OAUTH_TOKEN }}"
               fi
             } > .env.production
 
             mkdir -p "$DEPLOY_PATH/profiles"
+            sudo mkdir -p /var/lib/awardsferm 2>/dev/null || mkdir -p /var/lib/awardsferm
             chmod -R a+rwX "$DEPLOY_PATH/profiles" 2>/dev/null || true
 
             run_compose() {

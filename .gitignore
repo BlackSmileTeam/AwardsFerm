@@ -10,8 +10,11 @@
 
 profiles/**/browser-data/
 profiles/**/screenshots/
+profiles/**/cookies-*.json
 profiles/*.txt
 !profiles/*.example
+profiles/proxy.auth.json
+!profiles/proxy.auth.json.example
 !profiles/session-001/config.json
 !profiles/session-002/config.json
 !profiles/session-003/config.json

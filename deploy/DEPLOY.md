@@ -1,75 +1,127 @@
-# Деплой AwardsFerm
+# Деплой AwardsFerm (Linux)
 
-Два варианта публикации (по образцу [bebochka](https://github.com/BlackSmileTeam/bebochka)):
+## Production на VPS
 
-## 1. Монорепо — один `docker compose` (рекомендуется для старта)
+### 1. Подготовка сервера
 
-Workflow: `.github/workflows/deploy-production.yml`
+```bash
+sudo bash deploy/linux/setup-server.sh /opt/awardsferm
+```
 
-На сервере:
+Устанавливает Docker (если нет), создаёт `profiles/`, генерирует `.env.production` с `JWT_SECRET`.
+
+### 2. Конфигурация
+
+Скопируйте и отредактируйте:
+
+```bash
+cp .env.production.example .env.production
+nano .env.production
+```
+
+Обязательные поля:
+
+- `JWT_SECRET` — `openssl rand -base64 48`
+- `BROWSER_HEADLESS=true` — браузер без GUI (Linux)
+- `FRONTEND_PORT`, `API_PORT` — порты на хосте
+
+### 3. Запуск
 
 ```bash
 docker compose -f docker-compose.production.yml --env-file .env.production up -d --build
 ```
 
-Порты по умолчанию:
+### 4. Первый администратор
 
-| Сервис   | Хост   | Контейнер |
-|----------|--------|-----------|
-| Frontend | 55502  | 80        |
-| API      | 55501  | 8080      |
-| Worker   | —      | 8081      |
+После первого старта API (миграции применяются автоматически):
 
-Профили браузера: `./profiles` → `/app/profiles` в Worker.
+```bash
+bash deploy/linux/init-db-remote.sh
+```
 
-### GitHub Secrets
+Логин: `admin`, пароль: `Admin123!` — **смените после входа**.
+
+### 5. FirstVDS (текущий production)
+
+Сервер: **157.22.199.24** (`vasekisov.fvds.ru`), пользователь `deploy`.  
+На том же хосте уже работает Bebochka на `:55501` / `:55502`, поэтому AwardsFerm слушает:
+
+| Сервис | URL |
+|--------|-----|
+| Админ-панель | http://157.22.199.24:55504 |
+| API (прямой) | http://157.22.199.24:55503 |
+
+Путь на сервере: `/opt/awardsferm`  
+SSH-ключ (как у Bebochka): `C:\Users\vasek\.ssh\bebochka_firstvds_deploy`
+
+Ручной деплой с ПК (без git на сервере):
+
+```powershell
+cd E:\Project\Cursor\AwardsFerm
+tar -czf - --exclude=".git" --exclude="**/bin" --exclude="**/obj" --exclude="**/node_modules" --exclude="profiles/*/browser-data" . |
+  ssh -i $env:USERPROFILE\.ssh\bebochka_firstvds_deploy deploy@157.22.199.24 "tar -xzf - -C /opt/awardsferm"
+ssh -i $env:USERPROFILE\.ssh\bebochka_firstvds_deploy deploy@157.22.199.24 `
+  "cd /opt/awardsferm && docker compose -f docker-compose.production.yml --env-file .env.production up -d --build"
+```
+
+SQLite хранится в Docker volume `awardsferm_awardsferm-data` (контейнер `api:/var/lib/awardsferm/awardsferm.db`).
+
+### 6. Системный nginx (HTTPS)
+
+Проксируйте домен на фронт:
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name awards.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:55504;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+API снаружи не обязателен — nginx фронта проксирует `/api/` и `/hubs/`.
+
+## GitHub Actions
+
+Workflow: `.github/workflows/deploy-production.yml`
 
 | Secret | Описание |
 |--------|----------|
-| `PROD_HOST` | IP или hostname VPS |
-| `PROD_USER` | SSH-пользователь |
-| `PROD_SSH_PRIVATE_KEY` | Приватный ключ |
-| `PROD_SSH_PORT` | SSH-порт |
-| `PROD_DEPLOY_PATH` | Каталог на сервере (по умолчанию `/opt/awardsferm`) |
-| `PROD_FRONTEND_PORT` | Порт фронта (по умолчанию 55502) |
-| `PROD_API_PORT` | Порт API (по умолчанию 55501) |
-| `RSYA_OAUTH_TOKEN` | OAuth-токен РСЯ (опционально) |
+| `PROD_HOST` | `157.22.199.24` |
+| `PROD_USER` | `deploy` |
+| `PROD_SSH_PRIVATE_KEY` | содержимое `~/.ssh/bebochka_firstvds_deploy` |
+| `PROD_SSH_PORT` | `22` |
+| `PROD_DEPLOY_PATH` | `/opt/awardsferm` |
+| `PROD_FRONTEND_PORT` | `55504` (55502 занят Bebochka) |
+| `PROD_API_PORT` | `55503` (55501 занят Bebochka) |
+| `JWT_SECRET` | значение из `/opt/awardsferm/.env.production` на сервере |
+| `RSYA_OAUTH_TOKEN` | опционально |
 
-Скопируйте `.env.production.example` → `.env.production` и отредактируйте при ручном деплое.
+## Структура данных
 
-## 2. Раздельные контейнеры (как backend + frontend в bebochka)
+| Путь на хосте | Контейнер | Назначение |
+|---------------|-----------|------------|
+| `./profiles` | worker:/app/profiles | cookies, proxies.txt, rsya-token |
+| Docker volume `awardsferm-data` | api:/var/lib/awardsferm | SQLite |
 
-Workflows в монорепозитории запускаются из **корня** `.github/workflows/`:
+## Обновление
 
-- `deploy-production.yml` — полный стек (compose)
-- `deploy-api.yml` — только API
-- `deploy-worker.yml` — только Worker
-- `deploy-frontend.yml` — только UI
-
-Копии в `backend/*/`, `frontend/` — шаблоны на случай выноса в отдельные репозитории (как submodules в bebochka).
-
-Docker-сеть: `awardsferm-edge`. Порядок деплоя: **Worker → API → Frontend**.
-
-### Системный nginx (опционально)
-
-Проксируйте HTTPS на `127.0.0.1:55502` (фронт). API снаружи не обязателен — запросы идут через nginx фронта.
+```bash
+cd /opt/awardsferm
+git pull
+docker compose -f docker-compose.production.yml --env-file .env.production up -d --build
+```
 
 ## Локальная разработка
 
-```powershell
-.\start-dev.ps1
-```
-
-или `docker compose up --build` (dev-compose, порт UI 3000).
-
-## Структура
-
-```
-backend/
-  AwardsFerm.Api/     Dockerfile + CI
-  AwardsFerm.Worker/  Dockerfile + CI
-frontend/             Dockerfile, nginx.*.conf + CI
-docker/               legacy dev Dockerfiles
-docker-compose.yml              dev
-docker-compose.production.yml   production
-```
+| ОС | Команда |
+|----|---------|
+| Linux | `./start-dev.sh` |
+| Windows | `.\start-dev.ps1` |
+| Docker dev | `docker compose up --build` (UI :3000) |

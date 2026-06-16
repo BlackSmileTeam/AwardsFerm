@@ -16,6 +16,19 @@ builder.Services.AddHttpClient("api", client =>
     client.Timeout = TimeSpan.FromSeconds(30);
 });
 
+builder.Services.AddHttpClient("spysone", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(90);
+});
+
+builder.Services.AddHttpClient("proxymarket", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.BaseAddress = new Uri("https://api.dashboard.proxy.market");
+});
+
+builder.Services.AddHostedService<ProxyRefreshBackgroundService>();
+
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
@@ -25,25 +38,41 @@ var app = builder.Build();
 
 app.UseCors();
 
-app.MapPost("/internal/run", (WorkerRunRequest request, SessionExecutionService executor) =>
+app.MapPost("/internal/run", async (WorkerRunRequest request, SessionExecutionService executor, CancellationToken cancellationToken) =>
 {
-    if (executor.IsProfileRunning(request.ProfileId))
-        return Results.Conflict($"Профиль {request.ProfileId} уже выполняется.");
-
-    executor.StartAsync(request);
-    return Results.Accepted();
+    try
+    {
+        await executor.StartAsync(request, cancellationToken);
+        return Results.Accepted();
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Conflict(ex.Message);
+    }
 });
 
-app.MapPost("/internal/stop/{profileId}", (string profileId, SessionExecutionService executor) =>
+app.MapPost("/internal/stop/{profileId}", async (string profileId, SessionExecutionService executor, CancellationToken cancellationToken) =>
 {
-    executor.Stop(profileId);
+    await executor.StopAsync(profileId, cancellationToken);
     return Results.NoContent();
 });
 
-app.MapPost("/internal/stop", (SessionExecutionService executor) =>
+app.MapPost("/internal/pause/{profileId}", (string profileId, SessionExecutionService executor) =>
+{
+    executor.Pause(profileId);
+    return Results.NoContent();
+});
+
+app.MapPost("/internal/resume/{profileId}", (string profileId, SessionExecutionService executor) =>
+{
+    executor.Resume(profileId);
+    return Results.NoContent();
+});
+
+app.MapPost("/internal/stop", async (SessionExecutionService executor, CancellationToken cancellationToken) =>
 {
     foreach (var profileId in new[] { "session-001", "session-002", "session-003" })
-        executor.Stop(profileId);
+        await executor.StopAsync(profileId, cancellationToken);
 
     return Results.NoContent();
 });

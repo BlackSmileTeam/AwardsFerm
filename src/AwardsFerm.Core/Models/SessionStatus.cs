@@ -7,5 +7,6 @@ public enum SessionStatus
     Running,
     Completed,
     Failed,
-    Stopped
+    Stopped,
+    Paused
 }

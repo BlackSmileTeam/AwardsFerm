@@ -7,6 +7,7 @@ const STATUS_BY_NUMBER: Record<number, SessionStatus> = {
   3: 'Completed',
   4: 'Failed',
   5: 'Stopped',
+  6: 'Paused',
 }
 
 const STATUS_ALIASES: Record<string, SessionStatus> = {
@@ -16,12 +17,14 @@ const STATUS_ALIASES: Record<string, SessionStatus> = {
   completed: 'Completed',
   failed: 'Failed',
   stopped: 'Stopped',
+  paused: 'Paused',
   Idle: 'Idle',
   Starting: 'Starting',
   Running: 'Running',
   Completed: 'Completed',
   Failed: 'Failed',
   Stopped: 'Stopped',
+  Paused: 'Paused',
 }
 
 const EVENT_TYPE_BY_NUMBER: Record<number, SessionEventType> = {
@@ -29,8 +32,10 @@ const EVENT_TYPE_BY_NUMBER: Record<number, SessionEventType> = {
   1: 'StepChanged',
   2: 'Screenshot',
   3: 'StatusChanged',
-  4: 'Completed',
-  5: 'Failed',
+  4: 'IpDetected',
+  5: 'TrafficUpdated',
+  6: 'Completed',
+  7: 'Failed',
 }
 
 const EVENT_TYPE_ALIASES: Record<string, SessionEventType> = {
@@ -38,12 +43,16 @@ const EVENT_TYPE_ALIASES: Record<string, SessionEventType> = {
   stepchanged: 'StepChanged',
   screenshot: 'Screenshot',
   statuschanged: 'StatusChanged',
+  ipdetected: 'IpDetected',
+  trafficupdated: 'TrafficUpdated',
   completed: 'Completed',
   failed: 'Failed',
   Log: 'Log',
   StepChanged: 'StepChanged',
   Screenshot: 'Screenshot',
   StatusChanged: 'StatusChanged',
+  IpDetected: 'IpDetected',
+  TrafficUpdated: 'TrafficUpdated',
   Completed: 'Completed',
   Failed: 'Failed',
 }
@@ -65,6 +74,7 @@ export function normalizeSession(session: SessionInfo): SessionInfo {
     ...session,
     profileId: session.profileId ?? 'session-001',
     autoRestart: session.autoRestart ?? true,
+    trafficBytes: session.trafficBytes ?? 0,
     status: normalizeStatus(session.status),
   }
 }

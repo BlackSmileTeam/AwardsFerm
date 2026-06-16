@@ -86,9 +86,32 @@ internal static class SessionLocationHelper
     {
         profile.Latitude = lookup.Latitude;
         profile.Longitude = lookup.Longitude;
+        profile.GeoAnchorLatitude = lookup.Latitude;
+        profile.GeoAnchorLongitude = lookup.Longitude;
         if (!string.IsNullOrWhiteSpace(lookup.Timezone))
             profile.Timezone = lookup.Timezone;
         profile.LocationLabel = lookup.Label;
+    }
+
+    public static void SetGeoAnchor(DesktopProfile profile)
+    {
+        profile.GeoAnchorLatitude = profile.Latitude;
+        profile.GeoAnchorLongitude = profile.Longitude;
+    }
+
+    /// <summary>Случайное смещение вокруг якоря (~до 2–3 км).</summary>
+    public static void ApplyRandomDrift(DesktopProfile profile, Random random, double latSpan = 0.025, double lonSpan = 0.035)
+    {
+        var anchorLat = profile.GeoAnchorLatitude;
+        var anchorLon = profile.GeoAnchorLongitude;
+        if (anchorLat == 0 && anchorLon == 0)
+        {
+            anchorLat = profile.Latitude;
+            anchorLon = profile.Longitude;
+        }
+
+        profile.Latitude = anchorLat + (random.NextDouble() - 0.5) * latSpan;
+        profile.Longitude = anchorLon + (random.NextDouble() - 0.5) * lonSpan;
     }
 
     public static string Format(DesktopProfile profile) =>

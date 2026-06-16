@@ -1,8 +1,15 @@
-import * as signalR from '@microsoft/signalr'
-import type { RsyaDashboard, SessionEvent, SessionInfo, SessionSlotConfig } from './types'
+import type {
+  AdAccount,
+  CreateAdAccountRequest,
+  SessionEvent,
+  SessionInfo,
+  SessionSlotConfig,
+  UpdateAdAccountRequest,
+  UserProfitSummary,
+} from './types'
+import { getToken, clearAuth } from './auth'
 import { normalizeEventType, normalizeSession, normalizeStatus } from './utils/session'
 
-// Пустой VITE_API_URL = same-origin (в dev Vite проксирует /api и /hubs на :8080).
 const apiBase = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '')
 
 function apiPath(path: string): string {
@@ -10,13 +17,31 @@ function apiPath(path: string): string {
   return apiBase ? `${apiBase}${normalized}` : normalized
 }
 
-const defaultOptions = {
-  searchQuery: 'червячки',
-  targetGameTitle: 'Slither Worms Wars!',
-  targetGameUrlPart: 'slither-worms-wars-511328',
-  playDurationMinSeconds: 120,
-  playDurationMaxSeconds: 180,
-  headless: false,
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
+async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers)
+  const token = getToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  if (init.body && !headers.has('Content-Type'))
+    headers.set('Content-Type', 'application/json')
+
+  const res = await fetch(apiPath(path), { ...init, headers })
+
+  if (res.status === 401) {
+    clearAuth()
+    throw new ApiError('Требуется авторизация', 401)
+  }
+
+  return res
 }
 
 export async function checkApiHealth(): Promise<boolean> {
@@ -28,54 +53,143 @@ export async function checkApiHealth(): Promise<boolean> {
   }
 }
 
+export async function login(loginName: string, password: string): Promise<{ token: string; login: string }> {
+  const res = await fetch(apiPath('/api/auth/login'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ login: loginName, password }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Неверный логин или пароль')
+  }
+  return (await res.json()) as { token: string; login: string }
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const res = await apiFetch('/api/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ currentPassword, newPassword }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Не удалось сменить пароль')
+  }
+}
+
+export async function fetchAdAccounts(): Promise<AdAccount[]> {
+  const res = await apiFetch('/api/adaccounts')
+  if (!res.ok) throw new Error('Не удалось загрузить рекламные аккаунты')
+  return (await res.json()) as AdAccount[]
+}
+
+export async function createAdAccount(body: CreateAdAccountRequest): Promise<AdAccount> {
+  const res = await apiFetch('/api/adaccounts', { method: 'POST', body: JSON.stringify(body) })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Не удалось создать аккаунт')
+  }
+  return (await res.json()) as AdAccount
+}
+
+export async function updateAdAccount(id: number, body: UpdateAdAccountRequest): Promise<AdAccount> {
+  const res = await apiFetch(`/api/adaccounts/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Не удалось обновить аккаунт')
+  }
+  return (await res.json()) as AdAccount
+}
+
+export async function deleteAdAccount(id: number): Promise<void> {
+  const res = await apiFetch(`/api/adaccounts/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Не удалось удалить аккаунт')
+}
+
+export async function fetchUserProfit(): Promise<UserProfitSummary> {
+  const res = await apiFetch('/api/userprofit')
+  if (!res.ok) throw new Error('Не удалось загрузить прибыль')
+  return (await res.json()) as UserProfitSummary
+}
+
 export async function fetchSessions(): Promise<SessionInfo[]> {
-  const res = await fetch(apiPath('/api/sessions'))
+  const res = await apiFetch('/api/sessions')
   if (!res.ok) throw new Error('Не удалось получить список сессий')
   const data = (await res.json()) as SessionInfo[]
   return data.map(normalizeSession)
 }
 
-export async function fetchCurrentSession(): Promise<SessionInfo | null> {
-  const res = await fetch(apiPath('/api/sessions/current'))
-  if (!res.ok) throw new Error('Не удалось получить сессию')
-  const data = (await res.json()) as SessionInfo | null
-  return data ? normalizeSession(data) : null
-}
+export async function startSession(
+  adAccountId: number,
+  profileId: string,
+  options: {
+    gameTitle: string
+    gameUrl: string
+    stopAtMsk?: string | null
+    autoRestart?: boolean
+    proxyEnabled?: boolean
+  },
+): Promise<SessionInfo> {
+  const gameUrlPart = extractGameUrlPart(options.gameUrl)
+  const searchQuery = options.gameTitle.split(/\s+/)[0]?.toLowerCase() || 'игра'
 
-export async function startSession(profileId: string): Promise<SessionInfo> {
-  const res = await fetch(apiPath('/api/sessions/start'), {
+  const res = await apiFetch('/api/sessions/start', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      adAccountId,
       profileId,
-      autoRestart: true,
-      options: defaultOptions,
+      stopAtMsk: options.stopAtMsk ?? null,
+      autoRestart: options.autoRestart ?? true,
+      options: {
+        searchQuery,
+        targetGameTitle: options.gameTitle,
+        targetGameUrlPart: gameUrlPart,
+        playDurationMinSeconds: 120,
+        playDurationMaxSeconds: 180,
+        headless: false,
+        useProxy: options.proxyEnabled ?? true,
+      },
     }),
   })
+
   if (!res.ok) {
     const text = await res.text()
     throw new Error(text || 'Не удалось запустить сессию')
   }
-  const data = (await res.json()) as SessionInfo
-  return normalizeSession(data)
+  return normalizeSession((await res.json()) as SessionInfo)
 }
 
 export async function stopSession(sessionId: string): Promise<void> {
-  const res = await fetch(apiPath(`/api/sessions/${sessionId}/stop`), { method: 'POST' })
+  const res = await apiFetch(`/api/sessions/${sessionId}/stop`, { method: 'POST' })
   if (!res.ok) throw new Error('Не удалось остановить сессию')
 }
 
-export async function fetchSlots(): Promise<SessionSlotConfig[]> {
-  const res = await fetch(apiPath('/api/slots'))
+export async function pauseSession(sessionId: string): Promise<void> {
+  const res = await apiFetch(`/api/sessions/${sessionId}/pause`, { method: 'POST' })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Не удалось поставить сессию на паузу')
+  }
+}
+
+export async function resumeSession(sessionId: string): Promise<void> {
+  const res = await apiFetch(`/api/sessions/${sessionId}/resume`, { method: 'POST' })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Не удалось продолжить сессию')
+  }
+}
+
+export async function fetchSlots(adAccountId: number): Promise<SessionSlotConfig[]> {
+  const res = await apiFetch(`/api/slots?adAccountId=${adAccountId}`)
   if (!res.ok) throw new Error('Не удалось загрузить слоты сессий')
   return (await res.json()) as SessionSlotConfig[]
 }
 
-export async function addSlot(label?: string): Promise<SessionSlotConfig> {
-  const res = await fetch(apiPath('/api/slots'), {
+export async function addSlot(adAccountId: number, label?: string): Promise<SessionSlotConfig> {
+  const res = await apiFetch('/api/slots', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label }),
+    body: JSON.stringify({ adAccountId, label }),
   })
   if (!res.ok) {
     const text = await res.text()
@@ -85,12 +199,14 @@ export async function addSlot(label?: string): Promise<SessionSlotConfig> {
 }
 
 export async function updateSlot(
+  adAccountId: number,
   profileId: string,
-  patch: Partial<Pick<SessionSlotConfig, 'label' | 'scheduleEnabled' | 'scheduledStartMsk'>>,
+  patch: Partial<
+    Pick<SessionSlotConfig, 'label' | 'scheduleEnabled' | 'scheduledStartMsk' | 'stopAtMsk' | 'autoRestart' | 'proxyEnabled'>
+  >,
 ): Promise<SessionSlotConfig> {
-  const res = await fetch(apiPath(`/api/slots/${profileId}`), {
+  const res = await apiFetch(`/api/slots/${profileId}?adAccountId=${adAccountId}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
   })
   if (!res.ok) {
@@ -100,22 +216,27 @@ export async function updateSlot(
   return (await res.json()) as SessionSlotConfig
 }
 
-export async function deleteSlot(profileId: string): Promise<void> {
-  const res = await fetch(apiPath(`/api/slots/${profileId}`), { method: 'DELETE' })
+export async function deleteSlot(adAccountId: number, profileId: string): Promise<void> {
+  const res = await apiFetch(`/api/slots/${profileId}?adAccountId=${adAccountId}`, { method: 'DELETE' })
   if (!res.ok) {
     const text = await res.text()
     throw new Error(text || 'Не удалось удалить сессию')
   }
 }
 
-export async function fetchRsyaDashboard(): Promise<RsyaDashboard> {
-  const res = await fetch(apiPath('/api/rsya/dashboard'))
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || 'Не удалось загрузить статистику РСЯ')
+function extractGameUrlPart(gameUrl: string): string {
+  try {
+    const url = new URL(gameUrl)
+    const parts = url.pathname.split('/').filter(Boolean)
+    return parts[parts.length - 1] ?? gameUrl
+  } catch {
+    const parts = gameUrl.split('/').filter(Boolean)
+    return parts[parts.length - 1] ?? gameUrl
   }
-  return (await res.json()) as RsyaDashboard
 }
+
+// SignalR
+import * as signalR from '@microsoft/signalr'
 
 let hubConnection: signalR.HubConnection | null = null
 let hubHandler: ((event: SessionEvent) => void) | null = null
@@ -123,8 +244,9 @@ let hubHandler: ((event: SessionEvent) => void) | null = null
 function getHubConnection(): signalR.HubConnection {
   if (!hubConnection) {
     const hubUrl = apiPath('/hubs/session')
+    const token = getToken()
     hubConnection = new signalR.HubConnectionBuilder()
-      .withUrl(hubUrl)
+      .withUrl(hubUrl, token ? { accessTokenFactory: () => token } : undefined)
       .withAutomaticReconnect()
       .build()
   }
@@ -172,4 +294,12 @@ export async function ensureHubConnected(): Promise<boolean> {
   }
 
   return hub.state === signalR.HubConnectionState.Connected
+}
+
+export function resetHubConnection(): void {
+  if (hubConnection) {
+    void hubConnection.stop()
+    hubConnection = null
+  }
+  hubHandler = null
 }
