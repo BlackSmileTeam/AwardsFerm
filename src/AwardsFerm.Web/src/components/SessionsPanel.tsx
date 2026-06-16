@@ -8,10 +8,10 @@ import {
   fetchAdAccounts,
   fetchSessions,
   fetchSlots,
-  pauseSession,
-  resumeSession,
+  pauseSessionByProfile,
+  resumeSessionByProfile,
   startSession,
-  stopSession,
+  stopSessionByProfile,
   updateSlot,
 } from '../api'
 import {
@@ -284,15 +284,17 @@ export function SessionsPanel() {
   }
 
   const onStop = async (profileId: string) => {
-    const session = slots[profileId]?.session
-    if (!session) return
-
     setSlots((prev) => ({ ...prev, [profileId]: { ...prev[profileId], loading: true } }))
+    setNotice(null)
     try {
-      await stopSession(session.id)
-      delete sessionIdToProfile.current[session.id]
+      await stopSessionByProfile(profileId)
+      const session = slots[profileId]?.session
+      if (session) delete sessionIdToProfile.current[session.id]
       if (selectedAccountId) await syncSlotsWithSessions(selectedAccountId)
-      setSlots((prev) => ({ ...prev, [profileId]: { ...prev[profileId], loading: false } }))
+      setSlots((prev) => ({
+        ...prev,
+        [profileId]: { session: null, logs: prev[profileId]?.logs ?? [], loading: false },
+      }))
     } catch (e) {
       setNotice({ kind: 'error', text: e instanceof Error ? e.message : 'Ошибка остановки' })
       setSlots((prev) => ({ ...prev, [profileId]: { ...prev[profileId], loading: false } }))
@@ -300,12 +302,9 @@ export function SessionsPanel() {
   }
 
   const onPause = async (profileId: string) => {
-    const session = slots[profileId]?.session
-    if (!session) return
-
     setSlots((prev) => ({ ...prev, [profileId]: { ...prev[profileId], loading: true } }))
     try {
-      await pauseSession(session.id)
+      await pauseSessionByProfile(profileId)
       setSlots((prev) => ({
         ...prev,
         [profileId]: {
@@ -324,12 +323,9 @@ export function SessionsPanel() {
   }
 
   const onResume = async (profileId: string) => {
-    const session = slots[profileId]?.session
-    if (!session) return
-
     setSlots((prev) => ({ ...prev, [profileId]: { ...prev[profileId], loading: true } }))
     try {
-      await resumeSession(session.id)
+      await resumeSessionByProfile(profileId)
       setSlots((prev) => ({
         ...prev,
         [profileId]: {
@@ -394,9 +390,10 @@ export function SessionsPanel() {
     if (!approved) return
 
     try {
-      if (session) {
-        await stopSession(session.id)
-        delete sessionIdToProfile.current[session.id]
+      if (isActive) {
+        await stopSessionByProfile(profileId)
+        const session = slots[profileId]?.session
+        if (session) delete sessionIdToProfile.current[session.id]
       }
       await deleteSlot(selectedAccountId, profileId)
       setSlotConfigs((prev) => prev.filter((s) => s.profileId !== profileId))

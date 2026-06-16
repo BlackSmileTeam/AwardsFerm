@@ -104,34 +104,28 @@ public sealed class SessionRunnerService
 
     public async Task PauseProfileAsync(string profileId, CancellationToken cancellationToken = default)
     {
-        var session = _sessionManager.GetByProfileId(profileId);
-        if (session is null)
-            throw new InvalidOperationException("Сессия не найдена.");
-        if (session.Status is not (SessionStatus.Starting or SessionStatus.Running))
-            throw new InvalidOperationException("Пауза доступна только для активной сессии.");
-
         if (!await IsWorkerHealthyAsync(cancellationToken))
             throw new InvalidOperationException("Worker не запущен.");
 
         var client = _httpClientFactory.CreateClient("worker-quick");
         await client.PostAsync($"{GetWorkerBaseUrl()}/internal/pause/{profileId}", null, cancellationToken);
-        _sessionManager.PauseSession(profileId);
+
+        var session = _sessionManager.GetByProfileId(profileId);
+        if (session is not null)
+            _sessionManager.PauseSession(profileId);
     }
 
     public async Task ResumeProfileAsync(string profileId, CancellationToken cancellationToken = default)
     {
-        var session = _sessionManager.GetByProfileId(profileId);
-        if (session is null)
-            throw new InvalidOperationException("Сессия не найдена.");
-        if (session.Status is not SessionStatus.Paused)
-            throw new InvalidOperationException("Сессия не на паузе.");
-
         if (!await IsWorkerHealthyAsync(cancellationToken))
             throw new InvalidOperationException("Worker не запущен.");
 
         var client = _httpClientFactory.CreateClient("worker-quick");
         await client.PostAsync($"{GetWorkerBaseUrl()}/internal/resume/{profileId}", null, cancellationToken);
-        _sessionManager.ResumeSession(profileId);
+
+        var session = _sessionManager.GetByProfileId(profileId);
+        if (session is not null)
+            _sessionManager.ResumeSession(profileId);
     }
 
     private string GetWorkerBaseUrl() =>

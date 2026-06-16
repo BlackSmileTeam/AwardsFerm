@@ -88,6 +88,20 @@ public sealed class SessionsController : ControllerBase
         }
     }
 
+    [HttpPost("profile/{profileId}/stop")]
+    public async Task<IActionResult> StopByProfile(string profileId, CancellationToken cancellationToken)
+    {
+        var userId = GetUserId();
+        var adAccountId = await _resolver.ResolveAdAccountByProfileAsync(userId, profileId, cancellationToken);
+        if (adAccountId is null)
+            return NotFound();
+        if (!await _resolver.UserOwnsAccountAsync(userId, adAccountId.Value, cancellationToken))
+            return Forbid();
+
+        await _runner.StopProfileAsync(profileId, cancellationToken);
+        return NoContent();
+    }
+
     [HttpPost("{sessionId}/stop")]
     public async Task<IActionResult> StopById(string sessionId, CancellationToken cancellationToken)
     {
@@ -101,6 +115,48 @@ public sealed class SessionsController : ControllerBase
 
         await _runner.StopProfileAsync(session.ProfileId, cancellationToken);
         return NoContent();
+    }
+
+    [HttpPost("profile/{profileId}/pause")]
+    public async Task<IActionResult> PauseByProfile(string profileId, CancellationToken cancellationToken)
+    {
+        var userId = GetUserId();
+        var adAccountId = await _resolver.ResolveAdAccountByProfileAsync(userId, profileId, cancellationToken);
+        if (adAccountId is null)
+            return NotFound();
+        if (!await _resolver.UserOwnsAccountAsync(userId, adAccountId.Value, cancellationToken))
+            return Forbid();
+
+        try
+        {
+            await _runner.PauseProfileAsync(profileId, cancellationToken);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    [HttpPost("profile/{profileId}/resume")]
+    public async Task<IActionResult> ResumeByProfile(string profileId, CancellationToken cancellationToken)
+    {
+        var userId = GetUserId();
+        var adAccountId = await _resolver.ResolveAdAccountByProfileAsync(userId, profileId, cancellationToken);
+        if (adAccountId is null)
+            return NotFound();
+        if (!await _resolver.UserOwnsAccountAsync(userId, adAccountId.Value, cancellationToken))
+            return Forbid();
+
+        try
+        {
+            await _runner.ResumeProfileAsync(profileId, cancellationToken);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
     }
 
     [HttpPost("{sessionId}/pause")]
@@ -117,28 +173,6 @@ public sealed class SessionsController : ControllerBase
         try
         {
             await _runner.PauseProfileAsync(session.ProfileId, cancellationToken);
-            return NoContent();
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(ex.Message);
-        }
-    }
-
-    [HttpPost("{sessionId}/resume")]
-    public async Task<IActionResult> ResumeById(string sessionId, CancellationToken cancellationToken)
-    {
-        var session = _sessionManager.GetById(sessionId);
-        if (session is null)
-            return NotFound();
-        var userId = GetUserId();
-        if (session.AdAccountId is not null &&
-            !await _resolver.UserOwnsAccountAsync(userId, session.AdAccountId.Value, cancellationToken))
-            return Forbid();
-
-        try
-        {
-            await _runner.ResumeProfileAsync(session.ProfileId, cancellationToken);
             return NoContent();
         }
         catch (InvalidOperationException ex)

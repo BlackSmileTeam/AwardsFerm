@@ -159,11 +159,26 @@ export async function startSession(
   return normalizeSession((await res.json()) as SessionInfo)
 }
 
+export async function stopSessionByProfile(profileId: string): Promise<void> {
+  const res = await apiFetch(`/api/sessions/profile/${encodeURIComponent(profileId)}/stop`, { method: 'POST' })
+  if (!res.ok) throw new Error('Не удалось остановить сессию')
+}
+
+/** @deprecated используйте stopSessionByProfile */
 export async function stopSession(sessionId: string): Promise<void> {
   const res = await apiFetch(`/api/sessions/${sessionId}/stop`, { method: 'POST' })
   if (!res.ok) throw new Error('Не удалось остановить сессию')
 }
 
+export async function pauseSessionByProfile(profileId: string): Promise<void> {
+  const res = await apiFetch(`/api/sessions/profile/${encodeURIComponent(profileId)}/pause`, { method: 'POST' })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Не удалось поставить сессию на паузу')
+  }
+}
+
+/** @deprecated используйте pauseSessionByProfile */
 export async function pauseSession(sessionId: string): Promise<void> {
   const res = await apiFetch(`/api/sessions/${sessionId}/pause`, { method: 'POST' })
   if (!res.ok) {
@@ -172,6 +187,15 @@ export async function pauseSession(sessionId: string): Promise<void> {
   }
 }
 
+export async function resumeSessionByProfile(profileId: string): Promise<void> {
+  const res = await apiFetch(`/api/sessions/profile/${encodeURIComponent(profileId)}/resume`, { method: 'POST' })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Не удалось продолжить сессию')
+  }
+}
+
+/** @deprecated используйте resumeSessionByProfile */
 export async function resumeSession(sessionId: string): Promise<void> {
   const res = await apiFetch(`/api/sessions/${sessionId}/resume`, { method: 'POST' })
   if (!res.ok) {
