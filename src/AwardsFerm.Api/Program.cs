@@ -18,6 +18,8 @@ builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOpt
 var sqlitePath = Environment.GetEnvironmentVariable("SQLITE_DB_PATH")
                  ?? builder.Configuration["Database:Path"]
                  ?? "/var/lib/awardsferm/awardsferm.db";
+if (!Path.IsPathRooted(sqlitePath))
+    sqlitePath = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, sqlitePath));
 var sqliteDir = Path.GetDirectoryName(sqlitePath);
 if (!string.IsNullOrWhiteSpace(sqliteDir))
     Directory.CreateDirectory(sqliteDir);

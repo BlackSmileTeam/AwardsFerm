@@ -5,7 +5,8 @@
       "dotnetRunMessages": true,
       "applicationUrl": "http://localhost:8080",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "SQLITE_DB_PATH": "data/awardsferm.db"
       }
     }
   }
