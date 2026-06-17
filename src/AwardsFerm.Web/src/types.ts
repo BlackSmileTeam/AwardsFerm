@@ -66,6 +66,7 @@ export interface SlotState {
   session: SessionInfo | null
   logs: string[]
   loading: boolean
+  screenshotBase64?: string | null
 }
 
 export interface AdAccount {

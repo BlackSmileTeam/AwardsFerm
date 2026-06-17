@@ -5,15 +5,17 @@ import { AdAccountsPanel } from './components/AdAccountsPanel'
 import { LoginPage } from './components/LoginPage'
 import { ProfitDashboard } from './components/ProfitDashboard'
 import { ProfilePanel } from './components/ProfilePanel'
+import { ProxiesPanel } from './components/ProxiesPanel'
 import { SessionsPanel } from './components/SessionsPanel'
 import './App.css'
 
-type Tab = 'sessions' | 'accounts' | 'profit' | 'profile'
+type Tab = 'sessions' | 'accounts' | 'proxies' | 'profit' | 'profile'
 
 function App() {
   const [authed, setAuthed] = useState(isAuthenticated())
   const [userLogin, setUserLogin] = useState(getLogin() ?? '')
   const [tab, setTab] = useState<Tab>('sessions')
+  const [proxyPrefillName, setProxyPrefillName] = useState<string | null>(null)
   const [apiUp, setApiUp] = useState(false)
   const [mskTime, setMskTime] = useState('')
 
@@ -86,6 +88,9 @@ function App() {
         <button className={`tab-btn${tab === 'accounts' ? ' tab-btn-active' : ''}`} onClick={() => setTab('accounts')}>
           Аккаунты
         </button>
+        <button className={`tab-btn${tab === 'proxies' ? ' tab-btn-active' : ''}`} onClick={() => setTab('proxies')}>
+          Прокси
+        </button>
         <button className={`tab-btn${tab === 'profit' ? ' tab-btn-active' : ''}`} onClick={() => setTab('profit')}>
           Прибыль
         </button>
@@ -95,7 +100,22 @@ function App() {
       </nav>
 
       {tab === 'sessions' && <SessionsPanel />}
-      {tab === 'accounts' && <AdAccountsPanel selectedId={null} onSelect={() => {}} />}
+      {tab === 'accounts' && (
+        <AdAccountsPanel
+          selectedId={null}
+          onSelect={() => {}}
+          onOpenProxies={(account) => {
+            setProxyPrefillName(account.name)
+            setTab('proxies')
+          }}
+        />
+      )}
+      {tab === 'proxies' && (
+        <ProxiesPanel
+          prefillName={proxyPrefillName}
+          onPrefillUsed={() => setProxyPrefillName(null)}
+        />
+      )}
       {tab === 'profit' && <ProfitDashboard />}
       {tab === 'profile' && <ProfilePanel login={userLogin} />}
 

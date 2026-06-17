@@ -18,10 +18,12 @@ export function AdAccountsPanel({
   selectedId,
   onSelect,
   onChanged,
+  onOpenProxies,
 }: {
   selectedId: number | null
   onSelect: (id: number) => void
   onChanged?: () => void
+  onOpenProxies?: (account: AdAccount) => void
 }) {
   const [accounts, setAccounts] = useState<AdAccount[]>([])
   const [loading, setLoading] = useState(true)
@@ -124,6 +126,23 @@ export function AdAccountsPanel({
               <div className="account-card-actions">
                 <button
                   className="btn btn-ghost btn-sm"
+                  title="Добавить прокси"
+                  aria-label="Добавить прокси"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onOpenProxies?.(account)
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                    <path
+                      fill="currentColor"
+                      d="M4 5h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm0 8h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1zm2 2v2h2v-2H6zm10 0v2h2v-2h-2z"
+                    />
+                  </svg>
+                </button>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  title="Редактировать"
                   onClick={(e) => {
                     e.stopPropagation()
                     onEdit(account)
@@ -133,6 +152,7 @@ export function AdAccountsPanel({
                 </button>
                 <button
                   className="btn btn-ghost btn-sm"
+                  title="Удалить"
                   onClick={(e) => {
                     e.stopPropagation()
                     void onDelete(account.id)

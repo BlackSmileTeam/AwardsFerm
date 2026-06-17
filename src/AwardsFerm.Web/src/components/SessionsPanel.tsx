@@ -15,7 +15,6 @@ import {
   stopSessionByProfile,
   updateSlot,
 } from '../api'
-import { ProxiesPanel } from './ProxiesPanel'
 import {
   createEmptySlotState,
   type AdAccount,
@@ -54,6 +53,7 @@ export function SessionsPanel() {
   const [proxies, setProxies] = useState<ProxyConfig[]>([])
 
   const sessionIdToProfile = useRef<Record<string, string>>({})
+  const previewOpenRef = useRef<Record<string, boolean>>({})
   const confirmResolverRef = useRef<((value: boolean) => void) | null>(null)
   const slotConfigsRef = useRef(slotConfigs)
   const slotsRef = useRef(slots)
@@ -120,6 +120,10 @@ export function SessionsPanel() {
             ? { ...next.session, trafficBytes: event.trafficBytes }
             : next.session,
         }
+      }
+
+      if (event.type === 'Screenshot' && event.screenshotBase64 && previewOpenRef.current[profileId]) {
+        next = { ...next, screenshotBase64: event.screenshotBase64 }
       }
 
       if (event.type === 'Completed') {
@@ -262,6 +266,16 @@ export function SessionsPanel() {
     if (selectedAccountId === null) return
     void syncSlotsWithSessions(selectedAccountId).catch(() => {})
   }, [selectedAccountId, syncSlotsWithSessions])
+
+  const onPreviewChange = useCallback((profileId: string, open: boolean) => {
+    previewOpenRef.current[profileId] = open
+    if (!open) {
+      setSlots((prev) => ({
+        ...prev,
+        [profileId]: { ...prev[profileId], screenshotBase64: null },
+      }))
+    }
+  }, [])
 
   const onStart = async (profileId: string) => {
     if (!selectedAccountId || !selectedAccount) {
@@ -489,15 +503,13 @@ export function SessionsPanel() {
       {!selectedAccountId ? (
         <div className="error-banner">Создайте рекламный аккаунт во вкладке «Аккаунты».</div>
       ) : (
-        <>
-          <ProxiesPanel onChanged={() => void loadProxies()} />
-          <div className="sessions-grid">
-            {slotConfigs.map((slot) => (
-              <SessionCard
-                key={slot.profileId}
-                config={slot}
-                proxies={proxies}
-                state={slots[slot.profileId] ?? createEmptySlotState()}
+        <div className="sessions-grid">
+          {slotConfigs.map((slot) => (
+            <SessionCard
+              key={slot.profileId}
+              config={slot}
+              proxies={proxies}
+              state={slots[slot.profileId] ?? createEmptySlotState()}
               canDelete={slotConfigs.length > 1}
               onStart={() => void onStart(slot.profileId)}
               onStop={() => void onStop(slot.profileId)}
@@ -505,10 +517,10 @@ export function SessionsPanel() {
               onResume={() => void onResume(slot.profileId)}
               onDelete={() => void onDeleteSlot(slot.profileId)}
               onSlotChange={(patch) => void onSlotChange(slot.profileId, patch)}
+              onPreviewChange={(open) => onPreviewChange(slot.profileId, open)}
             />
           ))}
-          </div>
-        </>
+        </div>
       )}
 
       {confirmState && (
@@ -542,6 +554,7 @@ function SessionCard({
   onResume,
   onDelete,
   onSlotChange,
+  onPreviewChange,
 }: {
   config: SessionSlotConfig
   proxies: ProxyConfig[]
@@ -555,9 +568,11 @@ function SessionCard({
   onSlotChange: (
     patch: Partial<Pick<SessionSlotConfig, 'scheduleEnabled' | 'scheduledStartMsk' | 'stopAtMsk' | 'autoRestart' | 'proxyEnabled' | 'proxyId'>>,
   ) => void
+  onPreviewChange: (open: boolean) => void
 }) {
   const logViewRef = useRef<HTMLDivElement>(null)
   const [copied, setCopied] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const sessionStatus = normalizeStatus(state.session?.status)
   const isRunning = sessionStatus === 'Starting' || sessionStatus === 'Running'
   const isPaused = sessionStatus === 'Paused'
@@ -579,6 +594,19 @@ function SessionCard({
     const el = logViewRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [displayLogs])
+
+  useEffect(() => {
+    if (!isOccupied && previewOpen) {
+      setPreviewOpen(false)
+      onPreviewChange(false)
+    }
+  }, [isOccupied, previewOpen, onPreviewChange])
+
+  const togglePreview = () => {
+    const next = !previewOpen
+    setPreviewOpen(next)
+    onPreviewChange(next)
+  }
 
   const copyLogs = async () => {
     if (displayLogs.length === 0) return
@@ -730,6 +758,21 @@ function SessionCard({
         >
           ✕
         </button>
+        <button
+          type="button"
+          className={`btn btn-preview btn-sm${previewOpen ? ' btn-preview-active' : ''}`}
+          onClick={togglePreview}
+          disabled={!isOccupied}
+          title={isOccupied ? 'Просмотр браузера' : 'Просмотр доступен во время сессии'}
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"
+            />
+          </svg>
+          Просмотр
+        </button>
         <span className="step-hint">
           {state.session?.currentStep
             ? `Шаг ${state.session.currentStep}/${state.session.totalSteps}`
@@ -740,6 +783,28 @@ function SessionCard({
       <div className="progress-bar progress-bar-sm">
         <div className="progress-fill" style={{ width: `${progress}%` }} />
       </div>
+
+      {previewOpen && (
+        <div className="session-preview">
+          <div className="session-preview-header">
+            <span>Экран браузера</span>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={togglePreview}>
+              Скрыть
+            </button>
+          </div>
+          <div className="browser-viewport">
+            {state.screenshotBase64 ? (
+              <img
+                className="screenshot"
+                src={`data:image/jpeg;base64,${state.screenshotBase64}`}
+                alt="Экран браузера"
+              />
+            ) : (
+              <span className="screenshot-placeholder">Ожидание кадра…</span>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="log-panel-header">
         <span className="log-panel-title">Лог</span>

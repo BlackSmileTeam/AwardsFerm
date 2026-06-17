@@ -15,16 +15,16 @@ const emptyForm: CreateProxyRequest = {
 }
 
 type Props = {
-  onChanged?: () => void
+  prefillName?: string | null
+  onPrefillUsed?: () => void
 }
 
-export function ProxiesPanel({ onChanged }: Props) {
+export function ProxiesPanel({ prefillName, onPrefillUsed }: Props) {
   const [proxies, setProxies] = useState<ProxyConfig[]>([])
   const [form, setForm] = useState<CreateProxyRequest>(emptyForm)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState(true)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -41,6 +41,12 @@ export function ProxiesPanel({ onChanged }: Props) {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (!prefillName) return
+    setForm((f) => ({ ...f, name: prefillName }))
+    onPrefillUsed?.()
+  }, [prefillName, onPrefillUsed])
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -59,7 +65,6 @@ export function ProxiesPanel({ onChanged }: Props) {
       })
       setProxies((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))
       setForm(emptyForm)
-      onChanged?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось добавить прокси')
     } finally {
@@ -72,141 +77,130 @@ export function ProxiesPanel({ onChanged }: Props) {
     try {
       await deleteProxy(proxy.id)
       setProxies((prev) => prev.filter((p) => p.id !== proxy.id))
-      onChanged?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось удалить прокси')
     }
   }
 
   return (
-    <section className="proxies-panel">
-      <div className="proxies-panel-header">
-        <button type="button" className="proxies-toggle" onClick={() => setExpanded((v) => !v)}>
-          {expanded ? '▼' : '▶'} Прокси ({proxies.length})
+    <section className="proxies-page">
+      <div className="panel-header">
+        <h2>Прокси</h2>
+        <button className="btn btn-secondary btn-sm" onClick={() => void load()} disabled={loading}>
+          ↻
         </button>
-        <span className="proxies-hint">Добавьте прокси и выберите в слоте сессии</span>
       </div>
+      <p className="panel-muted">Добавьте прокси и выберите его в слоте сессии при включённой галочке «Прокси».</p>
 
-      {expanded && (
-        <>
-          {error && <div className="error-banner">{error}</div>}
+      {error && <div className="panel-error">{error}</div>}
 
-          <form className="proxy-form" onSubmit={(e) => void onSubmit(e)}>
-            <div className="proxy-form-row">
-              <label>
-                Название
-                <input
-                  value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  placeholder="ProxyCola Beeline"
-                  required
-                />
-              </label>
-              <label>
-                Тип
-                <select
-                  value={form.scheme}
-                  onChange={(e) => setForm((f) => ({ ...f, scheme: e.target.value }))}
-                >
-                  <option value="http">HTTP</option>
-                  <option value="socks5">SOCKS5</option>
-                </select>
-              </label>
-              <label>
-                Хост
-                <input
-                  value={form.host}
-                  onChange={(e) => setForm((f) => ({ ...f, host: e.target.value }))}
-                  placeholder="tproxy.pro"
-                  required
-                />
-              </label>
-              <label>
-                Порт
-                <input
-                  type="number"
-                  min={1}
-                  max={65535}
-                  value={form.port}
-                  onChange={(e) => setForm((f) => ({ ...f, port: Number(e.target.value) }))}
-                  required
-                />
-              </label>
-            </div>
-            <div className="proxy-form-row">
-              <label>
-                Логин
-                <input
-                  value={form.login ?? ''}
-                  onChange={(e) => setForm((f) => ({ ...f, login: e.target.value }))}
-                  placeholder="user"
-                />
-              </label>
-              <label>
-                Пароль
-                <input
-                  type="password"
-                  value={form.password ?? ''}
-                  onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                  placeholder="••••••••"
-                />
-              </label>
-              <label>
-                Локация (подпись)
-                <input
-                  value={form.locationLabel ?? ''}
-                  onChange={(e) => setForm((f) => ({ ...f, locationLabel: e.target.value }))}
-                  placeholder="Санкт-Петербург, Россия"
-                />
-              </label>
-              <label>
-                Timezone
-                <input
-                  value={form.timezone ?? ''}
-                  onChange={(e) => setForm((f) => ({ ...f, timezone: e.target.value }))}
-                  placeholder="Europe/Moscow"
-                />
-              </label>
-            </div>
-            <div className="proxy-form-actions">
-              <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>
-                {saving ? 'Сохранение…' : '+ Добавить прокси'}
+      <form className="proxy-form" onSubmit={(e) => void onSubmit(e)}>
+        <h3>Новый прокси</h3>
+        <div className="proxy-form-row">
+          <label>
+            Название
+            <input
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              placeholder="ProxyCola Beeline"
+              required
+            />
+          </label>
+          <label>
+            Тип
+            <select value={form.scheme} onChange={(e) => setForm((f) => ({ ...f, scheme: e.target.value }))}>
+              <option value="http">HTTP</option>
+              <option value="socks5">SOCKS5</option>
+            </select>
+          </label>
+          <label>
+            Хост
+            <input
+              value={form.host}
+              onChange={(e) => setForm((f) => ({ ...f, host: e.target.value }))}
+              placeholder="tproxy.pro"
+              required
+            />
+          </label>
+          <label>
+            Порт
+            <input
+              type="number"
+              min={1}
+              max={65535}
+              value={form.port}
+              onChange={(e) => setForm((f) => ({ ...f, port: Number(e.target.value) }))}
+              required
+            />
+          </label>
+        </div>
+        <div className="proxy-form-row">
+          <label>
+            Логин
+            <input
+              value={form.login ?? ''}
+              onChange={(e) => setForm((f) => ({ ...f, login: e.target.value }))}
+              placeholder="user"
+            />
+          </label>
+          <label>
+            Пароль
+            <input
+              type="password"
+              value={form.password ?? ''}
+              onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+              placeholder="••••••••"
+            />
+          </label>
+          <label>
+            Локация (подпись)
+            <input
+              value={form.locationLabel ?? ''}
+              onChange={(e) => setForm((f) => ({ ...f, locationLabel: e.target.value }))}
+              placeholder="Санкт-Петербург, Россия"
+            />
+          </label>
+          <label>
+            Timezone
+            <input
+              value={form.timezone ?? ''}
+              onChange={(e) => setForm((f) => ({ ...f, timezone: e.target.value }))}
+              placeholder="Europe/Moscow"
+            />
+          </label>
+        </div>
+        <div className="proxy-form-actions">
+          <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>
+            {saving ? 'Сохранение…' : 'Добавить прокси'}
+          </button>
+        </div>
+      </form>
+
+      <div className="proxy-list">
+        <h3>Сохранённые прокси</h3>
+        {loading ? (
+          <p className="panel-muted">Загрузка…</p>
+        ) : proxies.length === 0 ? (
+          <p className="panel-muted">Прокси пока нет</p>
+        ) : (
+          proxies.map((proxy) => (
+            <div key={proxy.id} className="proxy-list-item">
+              <div>
+                <strong>{proxy.name}</strong>
+                <span className="proxy-list-addr">
+                  {proxy.scheme}://{proxy.host}:{proxy.port}
+                  {proxy.login ? ` · ${proxy.login}` : ''}
+                  {proxy.hasPassword ? ' · пароль ✓' : ''}
+                </span>
+                {proxy.locationLabel && <span className="proxy-list-geo">{proxy.locationLabel}</span>}
+              </div>
+              <button type="button" className="btn btn-danger btn-sm" onClick={() => void onDelete(proxy)}>
+                ✕
               </button>
             </div>
-          </form>
-
-          <div className="proxy-list">
-            {loading ? (
-              <span className="log-empty">Загрузка…</span>
-            ) : proxies.length === 0 ? (
-              <span className="log-empty">Прокси пока нет — добавьте выше</span>
-            ) : (
-              proxies.map((proxy) => (
-                <div key={proxy.id} className="proxy-list-item">
-                  <div>
-                    <strong>{proxy.name}</strong>
-                    <span className="proxy-list-addr">
-                      {proxy.scheme}://{proxy.host}:{proxy.port}
-                      {proxy.login ? ` · ${proxy.login}` : ''}
-                      {proxy.hasPassword ? ' · пароль ✓' : ''}
-                    </span>
-                    {proxy.locationLabel && (
-                      <span className="proxy-list-geo">{proxy.locationLabel}</span>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-danger btn-sm"
-                    onClick={() => void onDelete(proxy)}
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        </>
-      )}
+          ))
+        )}
+      </div>
     </section>
   )
 }
