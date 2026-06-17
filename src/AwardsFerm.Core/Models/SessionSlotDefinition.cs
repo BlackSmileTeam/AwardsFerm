@@ -13,6 +13,7 @@ public sealed class SessionSlotDefinition
     public string? StopAtMsk { get; set; }
     public bool AutoRestart { get; set; } = true;
     public bool ProxyEnabled { get; set; } = true;
+    public long? ProxyId { get; set; }
 }
 
 public sealed class SessionSlotsConfig
@@ -28,6 +29,7 @@ public sealed class UpdateSessionSlotRequest
     public string? StopAtMsk { get; set; }
     public bool? AutoRestart { get; set; }
     public bool? ProxyEnabled { get; set; }
+    public long? ProxyId { get; set; }
 }
 
 public sealed class CreateSessionSlotRequest

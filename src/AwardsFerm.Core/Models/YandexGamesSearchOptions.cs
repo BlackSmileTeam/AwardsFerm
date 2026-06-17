@@ -10,6 +10,9 @@ public sealed class YandexGamesSearchOptions
     public int PlayDurationMaxSeconds { get; set; } = 180;
     public bool Headless { get; set; }
 
-    /// <summary>Использовать прокси из profiles/proxies.txt и proxy.auth.json.</summary>
+    /// <summary>Использовать прокси (из списка в UI или profiles/proxies.txt).</summary>
     public bool UseProxy { get; set; } = true;
+
+    /// <summary>Конкретный прокси URL (http://user:pass@host:port). Если задан — rotator не используется.</summary>
+    public string? ProxyUrl { get; set; }
 }

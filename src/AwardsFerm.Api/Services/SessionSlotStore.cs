@@ -42,7 +42,8 @@ public sealed class SessionSlotStore
                 ScheduledStartMsk = x.ScheduledStartMsk,
                 StopAtMsk = x.StopAtMsk,
                 AutoRestart = x.AutoRestart,
-                ProxyEnabled = x.ProxyEnabled
+                ProxyEnabled = x.ProxyEnabled,
+                ProxyId = x.ProxyId
             })
             .ToList();
     }
@@ -84,7 +85,8 @@ public sealed class SessionSlotStore
             ScheduledStartMsk = slot.ScheduledStartMsk,
             StopAtMsk = slot.StopAtMsk,
             AutoRestart = slot.AutoRestart,
-            ProxyEnabled = slot.ProxyEnabled
+            ProxyEnabled = slot.ProxyEnabled,
+            ProxyId = slot.ProxyId
         };
     }
 
@@ -117,6 +119,11 @@ public sealed class SessionSlotStore
         if (request.ProxyEnabled.HasValue)
             slot.ProxyEnabled = request.ProxyEnabled.Value;
 
+        if (request.ProxyId.HasValue)
+            slot.ProxyId = request.ProxyId.Value > 0 ? request.ProxyId : null;
+        else if (request.ProxyEnabled == false)
+            slot.ProxyId = null;
+
         db.SaveChanges();
 
         return new SessionSlotDefinition
@@ -129,7 +136,8 @@ public sealed class SessionSlotStore
             ScheduledStartMsk = slot.ScheduledStartMsk,
             StopAtMsk = slot.StopAtMsk,
             AutoRestart = slot.AutoRestart,
-            ProxyEnabled = slot.ProxyEnabled
+            ProxyEnabled = slot.ProxyEnabled,
+            ProxyId = slot.ProxyId
         };
     }
 

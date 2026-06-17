@@ -6,6 +6,7 @@ import {
   deleteSlot,
   ensureHubConnected,
   fetchAdAccounts,
+  fetchProxies,
   fetchSessions,
   fetchSlots,
   pauseSessionByProfile,
@@ -14,9 +15,11 @@ import {
   stopSessionByProfile,
   updateSlot,
 } from '../api'
+import { ProxiesPanel } from './ProxiesPanel'
 import {
   createEmptySlotState,
   type AdAccount,
+  type ProxyConfig,
   type SessionEvent,
   type SessionSlotConfig,
   type SessionStatus,
@@ -48,6 +51,7 @@ export function SessionsPanel() {
   } | null>(null)
   const [connected, setConnected] = useState(false)
   const [addingSlot, setAddingSlot] = useState(false)
+  const [proxies, setProxies] = useState<ProxyConfig[]>([])
 
   const sessionIdToProfile = useRef<Record<string, string>>({})
   const confirmResolverRef = useRef<((value: boolean) => void) | null>(null)
@@ -184,6 +188,14 @@ export function SessionsPanel() {
     }
   }, [])
 
+  const loadProxies = useCallback(async () => {
+    try {
+      setProxies(await fetchProxies())
+    } catch {
+      setProxies([])
+    }
+  }, [])
+
   const syncSlotsWithSessions = useCallback(async (adAccountId: number) => {
     const configs = await fetchSlots(adAccountId)
     setSlotConfigs(configs)
@@ -231,6 +243,7 @@ export function SessionsPanel() {
     const sync = async () => {
       try {
         await loadAccounts()
+        await loadProxies()
         const accountId = selectedAccountRef.current
         if (accountId) await syncSlotsWithSessions(accountId)
       } catch (e) {
@@ -243,7 +256,7 @@ export function SessionsPanel() {
     void sync()
     const interval = window.setInterval(() => void sync(), 5000)
     return () => window.clearInterval(interval)
-  }, [handleEvent, loadAccounts, syncSlotsWithSessions])
+  }, [handleEvent, loadAccounts, loadProxies, syncSlotsWithSessions])
 
   useEffect(() => {
     if (selectedAccountId === null) return
@@ -409,7 +422,7 @@ export function SessionsPanel() {
 
   const onSlotChange = async (
     profileId: string,
-    patch: Partial<Pick<SessionSlotConfig, 'label' | 'scheduleEnabled' | 'scheduledStartMsk' | 'stopAtMsk' | 'autoRestart' | 'proxyEnabled'>>,
+    patch: Partial<Pick<SessionSlotConfig, 'label' | 'scheduleEnabled' | 'scheduledStartMsk' | 'stopAtMsk' | 'autoRestart' | 'proxyEnabled' | 'proxyId'>>,
   ) => {
     if (!selectedAccountId) return
     try {
@@ -476,12 +489,15 @@ export function SessionsPanel() {
       {!selectedAccountId ? (
         <div className="error-banner">Создайте рекламный аккаунт во вкладке «Аккаунты».</div>
       ) : (
-        <div className="sessions-grid">
-          {slotConfigs.map((slot) => (
-            <SessionCard
-              key={slot.profileId}
-              config={slot}
-              state={slots[slot.profileId] ?? createEmptySlotState()}
+        <>
+          <ProxiesPanel onChanged={() => void loadProxies()} />
+          <div className="sessions-grid">
+            {slotConfigs.map((slot) => (
+              <SessionCard
+                key={slot.profileId}
+                config={slot}
+                proxies={proxies}
+                state={slots[slot.profileId] ?? createEmptySlotState()}
               canDelete={slotConfigs.length > 1}
               onStart={() => void onStart(slot.profileId)}
               onStop={() => void onStop(slot.profileId)}
@@ -491,7 +507,8 @@ export function SessionsPanel() {
               onSlotChange={(patch) => void onSlotChange(slot.profileId, patch)}
             />
           ))}
-        </div>
+          </div>
+        </>
       )}
 
       {confirmState && (
@@ -516,6 +533,7 @@ export function SessionsPanel() {
 
 function SessionCard({
   config,
+  proxies,
   state,
   canDelete,
   onStart,
@@ -526,6 +544,7 @@ function SessionCard({
   onSlotChange,
 }: {
   config: SessionSlotConfig
+  proxies: ProxyConfig[]
   state: SlotState
   canDelete: boolean
   onStart: () => void
@@ -534,7 +553,7 @@ function SessionCard({
   onResume: () => void
   onDelete: () => void
   onSlotChange: (
-    patch: Partial<Pick<SessionSlotConfig, 'scheduleEnabled' | 'scheduledStartMsk' | 'stopAtMsk' | 'autoRestart' | 'proxyEnabled'>>,
+    patch: Partial<Pick<SessionSlotConfig, 'scheduleEnabled' | 'scheduledStartMsk' | 'stopAtMsk' | 'autoRestart' | 'proxyEnabled' | 'proxyId'>>,
   ) => void
 }) {
   const logViewRef = useRef<HTMLDivElement>(null)
@@ -565,7 +584,22 @@ function SessionCard({
     if (displayLogs.length === 0) return
     const text = displayLogs.join('\n')
     try {
-      await navigator.clipboard.writeText(text)
+      if (window.isSecureContext && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        const textarea = document.createElement('textarea')
+        textarea.value = text
+        textarea.setAttribute('readonly', '')
+        textarea.style.position = 'fixed'
+        textarea.style.top = '-9999px'
+        textarea.style.opacity = '0'
+        document.body.appendChild(textarea)
+        textarea.focus()
+        textarea.select()
+        const copied = document.execCommand('copy')
+        document.body.removeChild(textarea)
+        if (!copied) throw new Error('copy failed')
+      }
       setCopied(true)
       window.setTimeout(() => setCopied(false), 2000)
     } catch {
@@ -628,10 +662,36 @@ function SessionCard({
           <input
             type="checkbox"
             checked={config.proxyEnabled ?? true}
-            onChange={(e) => onSlotChange({ proxyEnabled: e.target.checked })}
+            onChange={(e) =>
+              onSlotChange({
+                proxyEnabled: e.target.checked,
+                proxyId: e.target.checked ? config.proxyId ?? undefined : 0,
+              })
+            }
           />
           Прокси
         </label>
+        {(config.proxyEnabled ?? true) && (
+          <label className="schedule-label proxy-select-label">
+            Прокси из списка
+            <select
+              className="proxy-select"
+              value={config.proxyId ?? ''}
+              onChange={(e) =>
+                onSlotChange({
+                  proxyId: e.target.value ? Number(e.target.value) : 0,
+                })
+              }
+            >
+              <option value="">— выберите —</option>
+              {proxies.map((proxy) => (
+                <option key={proxy.id} value={proxy.id}>
+                  {proxy.name} ({proxy.host}:{proxy.port})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label className="schedule-label">
           <input
             type="checkbox"

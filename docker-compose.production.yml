@@ -9,7 +9,11 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       Api__BaseUrl: http://api:8080
       BROWSER_HEADLESS: ${BROWSER_HEADLESS:-true}
+      BROWSER_VNC: ${BROWSER_VNC:-false}
+      BROWSER_VNC_PASSWORD: ${BROWSER_VNC_PASSWORD:-}
       RSYA_OAUTH_TOKEN: ${RSYA_OAUTH_TOKEN:-}
+    ports:
+      - "${WORKER_VNC_PORT:-55900}:5900"
     volumes:
       - ./profiles:/app/profiles
     shm_size: "2gb"

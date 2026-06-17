@@ -61,6 +61,7 @@ builder.Services.AddSignalR()
     });
 
 builder.Services.AddSingleton<SessionSlotStore>();
+builder.Services.AddSingleton<ProxyStore>();
 builder.Services.AddSingleton<SessionManager>();
 builder.Services.AddSingleton<SessionRunnerService>();
 builder.Services.AddHostedService<ScheduledSessionService>();

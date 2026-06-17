@@ -19,7 +19,7 @@ internal static class DeviceFingerprintRotator
         string GpuRenderer,
         string UserAgentFormat);
 
-    private static readonly (string Vendor, string Renderer)[] DesktopGpus =
+    private static readonly (string Vendor, string Renderer)[] LaptopGpus =
     [
         ("Intel Inc.", "Intel Iris OpenGL Engine"),
         ("Intel Inc.", "Intel(R) UHD Graphics 630"),
@@ -27,15 +27,6 @@ internal static class DeviceFingerprintRotator
         ("NVIDIA Corporation", "NVIDIA GeForce RTX 3060/PCIe/SSE2"),
         ("AMD", "AMD Radeon RX 580 Series"),
         ("Google Inc. (Intel)", "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)")
-    ];
-
-    private static readonly (string Model, string Android, int W, int H, double Dpr)[] PhoneModels =
-    [
-        ("SM-S918B", "14", 412, 915, 2.5),
-        ("22101320G", "13", 393, 873, 2.5),
-        ("Pixel 8", "14", 412, 892, 2.5),
-        ("2201116SG", "12", 360, 800, 2.0),
-        ("M2101K6G", "13", 393, 851, 2.5)
     ];
 
     private static readonly (string Model, string Android, int W, int H, double Dpr)[] TabletModels =
@@ -55,13 +46,30 @@ internal static class DeviceFingerprintRotator
     ];
 
     /// <summary>Случайный отпечаток устройства на каждый запуск сессии (базовый профиль не перезаписывается).</summary>
-    public static DesktopProfile RotateForSession(DesktopProfile baseProfile, string profilesRoot, bool useProxy = true)
+    public static DesktopProfile RotateForSession(
+        DesktopProfile baseProfile,
+        string profilesRoot,
+        bool useProxy = true,
+        string? explicitProxyUrl = null)
     {
         var chromeMajor = Random.Next(120, 132);
         var chromeBuild = Random.Next(6100, 6800);
         var template = PickDeviceTemplate(chromeMajor, chromeBuild);
-        var proxyEntry = useProxy ? ProxyRotator.PickForProfile(profilesRoot, baseProfile.Id) : null;
-        string? proxy = proxyEntry?.Url;
+        ProxyEntry? proxyEntry = null;
+        if (!string.IsNullOrWhiteSpace(explicitProxyUrl))
+        {
+            proxyEntry = new ProxyEntry
+            {
+                Url = explicitProxyUrl,
+                Geo = ProxyRotator.ResolveGeo(explicitProxyUrl, null)
+            };
+        }
+        else if (useProxy)
+        {
+            proxyEntry = ProxyRotator.PickForProfile(profilesRoot, baseProfile.Id);
+        }
+
+        var proxy = proxyEntry?.Url;
         var browserSessionId = Guid.NewGuid().ToString("N");
         if (proxy is not null)
             proxy = ProxyUrlHelper.ConfigureForProfile(proxy, baseProfile.Id);
@@ -112,26 +120,25 @@ internal static class DeviceFingerprintRotator
         _ = chromeBuild;
         return Random.Next(100) switch
         {
-            < 38 => PickDesktop(),
-            < 72 => PickPhone(),
+            < 55 => PickLaptop(),
             _ => PickTablet()
         };
     }
 
-    private static DeviceTemplate PickDesktop()
+    private static DeviceTemplate PickLaptop()
     {
-        var gpu = DesktopGpus[Random.Next(DesktopGpus.Length)];
+        var gpu = LaptopGpus[Random.Next(LaptopGpus.Length)];
         var cores = new[] { 4, 6, 8, 12, 16 }[Random.Next(5)];
         var memory = new[] { 4, 8, 16 }[Random.Next(3)];
-        var widths = new[] { 1920, 1680, 1536, 1440, 1366 };
+        var widths = new[] { 1680, 1536, 1440, 1366, 1280 };
         var width = widths[Random.Next(widths.Length)];
         var height = width switch
         {
-            1920 => 1080,
             1680 => 1050,
             1536 => 864,
             1440 => 900,
-            _ => 768
+            1366 => 768,
+            _ => 800
         };
 
         return new DeviceTemplate(
@@ -146,24 +153,6 @@ internal static class DeviceFingerprintRotator
             gpu.Vendor,
             gpu.Renderer,
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{0}.0.{1}.0 Safari/537.36");
-    }
-
-    private static DeviceTemplate PickPhone()
-    {
-        var phone = PhoneModels[Random.Next(PhoneModels.Length)];
-        var gpu = MobileGpus[Random.Next(MobileGpus.Length)];
-        return new DeviceTemplate(
-            DeviceFormFactor.Phone,
-            phone.W,
-            phone.H,
-            phone.Dpr,
-            8,
-            8,
-            "Linux armv8l",
-            5,
-            gpu.Vendor,
-            gpu.Renderer,
-            $"Mozilla/5.0 (Linux; Android {phone.Android}; {phone.Model}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{{0}}.0.{{1}}.0 Mobile Safari/537.36");
     }
 
     private static DeviceTemplate PickTablet()
@@ -230,9 +219,8 @@ internal static class DeviceFingerprintRotator
 
         var deviceLabel = profile.FormFactor switch
         {
-            DeviceFormFactor.Phone => "телефон",
             DeviceFormFactor.Tablet => "планшет",
-            _ => "ПК"
+            _ => "ноутбук"
         };
 
         return $"ID: {profile.SessionDeviceId[..8]}…, {ipPart}, " +

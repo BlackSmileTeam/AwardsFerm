@@ -61,12 +61,18 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
 
             for (var proxyTry = 0; proxyTry < maxProxyAttempts; proxyTry++)
             {
-                sessionProfile = DeviceFingerprintRotator.RotateForSession(profile, _profilesRoot, useProxy);
+                sessionProfile = DeviceFingerprintRotator.RotateForSession(
+                    profile,
+                    _profilesRoot,
+                    useProxy,
+                    options.ProxyUrl);
                 if (useProxy && sessionProfile.ProxyUrl is null)
                 {
                     await ReportLogAsync(
                         sessionId,
-                        "Прокси включён, но не найден в profiles/proxies.txt — проверьте файл и proxy.auth.json",
+                        options.ProxyUrl is null
+                            ? "Прокси включён, но не выбран в слоте и не найден в profiles/proxies.txt — добавьте прокси в UI или proxies.txt"
+                            : "Прокси включён, но URL не удалось применить",
                         cancellationToken);
                 }
                 if (sessionProfile.ProxyUrl is not null)

@@ -6,6 +6,7 @@ public sealed class SessionRunnerService
 {
     private readonly SessionManager _sessionManager;
     private readonly SessionSlotStore _slotStore;
+    private readonly ProxyStore _proxyStore;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<SessionRunnerService> _logger;
@@ -13,12 +14,14 @@ public sealed class SessionRunnerService
     public SessionRunnerService(
         SessionManager sessionManager,
         SessionSlotStore slotStore,
+        ProxyStore proxyStore,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
         ILogger<SessionRunnerService> logger)
     {
         _sessionManager = sessionManager;
         _slotStore = slotStore;
+        _proxyStore = proxyStore;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _logger = logger;
@@ -27,15 +30,7 @@ public sealed class SessionRunnerService
     public async Task<SessionInfo> StartAsync(StartSessionRequest request, CancellationToken cancellationToken = default)
     {
         request.Options ??= new YandexGamesSearchOptions { Headless = false };
-        if (request.AdAccountId is not null && !string.IsNullOrWhiteSpace(request.ProfileId))
-        {
-            var slot = _slotStore.GetAll(request.AdAccountId.Value).FirstOrDefault(x => x.ProfileId == request.ProfileId);
-            if (slot is not null)
-            {
-                request.StopAtMsk ??= slot.StopAtMsk;
-                request.AutoRestart ??= slot.AutoRestart;
-            }
-        }
+        ApplySlotSettings(request);
 
         var profileId = string.IsNullOrWhiteSpace(request.ProfileId) ? "session-001" : request.ProfileId.Trim();
 
@@ -126,6 +121,37 @@ public sealed class SessionRunnerService
         var session = _sessionManager.GetByProfileId(profileId);
         if (session is not null)
             _sessionManager.ResumeSession(profileId);
+    }
+
+    private void ApplySlotSettings(StartSessionRequest request)
+    {
+        if (request.AdAccountId is null || string.IsNullOrWhiteSpace(request.ProfileId))
+            return;
+
+        var slot = _slotStore.GetAll(request.AdAccountId.Value)
+            .FirstOrDefault(x => x.ProfileId == request.ProfileId);
+        if (slot is null)
+            return;
+
+        request.StopAtMsk ??= slot.StopAtMsk;
+        request.AutoRestart ??= slot.AutoRestart;
+        request.Options ??= new YandexGamesSearchOptions { Headless = false };
+        request.Options.UseProxy = slot.ProxyEnabled;
+
+        if (!slot.ProxyEnabled)
+        {
+            request.Options.ProxyUrl = null;
+            return;
+        }
+
+        if (slot.ProxyId is null)
+            return;
+
+        var userId = _proxyStore.GetUserIdForAccount(request.AdAccountId.Value);
+        if (userId is null)
+            return;
+
+        request.Options.ProxyUrl = _proxyStore.BuildProxyUrl(userId.Value, slot.ProxyId.Value);
     }
 
     private string GetWorkerBaseUrl() =>

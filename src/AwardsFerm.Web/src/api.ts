@@ -1,6 +1,8 @@
 import type {
   AdAccount,
   CreateAdAccountRequest,
+  CreateProxyRequest,
+  ProxyConfig,
   SessionEvent,
   SessionInfo,
   SessionSlotConfig,
@@ -226,7 +228,7 @@ export async function updateSlot(
   adAccountId: number,
   profileId: string,
   patch: Partial<
-    Pick<SessionSlotConfig, 'label' | 'scheduleEnabled' | 'scheduledStartMsk' | 'stopAtMsk' | 'autoRestart' | 'proxyEnabled'>
+    Pick<SessionSlotConfig, 'label' | 'scheduleEnabled' | 'scheduledStartMsk' | 'stopAtMsk' | 'autoRestart' | 'proxyEnabled' | 'proxyId'>
   >,
 ): Promise<SessionSlotConfig> {
   const res = await apiFetch(`/api/slots/${profileId}?adAccountId=${adAccountId}`, {
@@ -245,6 +247,29 @@ export async function deleteSlot(adAccountId: number, profileId: string): Promis
   if (!res.ok) {
     const text = await res.text()
     throw new Error(text || 'Не удалось удалить сессию')
+  }
+}
+
+export async function fetchProxies(): Promise<ProxyConfig[]> {
+  const res = await apiFetch('/api/proxies')
+  if (!res.ok) throw new Error('Не удалось загрузить прокси')
+  return (await res.json()) as ProxyConfig[]
+}
+
+export async function createProxy(body: CreateProxyRequest): Promise<ProxyConfig> {
+  const res = await apiFetch('/api/proxies', { method: 'POST', body: JSON.stringify(body) })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Не удалось добавить прокси')
+  }
+  return (await res.json()) as ProxyConfig
+}
+
+export async function deleteProxy(proxyId: number): Promise<void> {
+  const res = await apiFetch(`/api/proxies/${proxyId}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Не удалось удалить прокси')
   }
 }
 

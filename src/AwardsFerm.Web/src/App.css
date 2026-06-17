@@ -1016,3 +1016,100 @@
   color: #fdd663;
 }
 
+.proxies-panel {
+  background: #161b26;
+  border: 1px solid #2d3348;
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.proxies-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.proxies-toggle {
+  background: none;
+  border: none;
+  color: #e8eaed;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.proxies-hint {
+  color: #9aa0a6;
+  font-size: 0.85rem;
+}
+
+.proxy-form {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.proxy-form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+.proxy-form-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: #9aa0a6;
+}
+
+.proxy-form-row input,
+.proxy-form-row select,
+.proxy-select {
+  background: #0f131a;
+  border: 1px solid #2d3348;
+  border-radius: 8px;
+  color: #e8eaed;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+.proxy-form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.proxy-list {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.proxy-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: #0f131a;
+  border: 1px solid #2d3348;
+  border-radius: 8px;
+}
+
+.proxy-list-addr,
+.proxy-list-geo {
+  display: block;
+  font-size: 0.8rem;
+  color: #9aa0a6;
+}
+
+.proxy-select-label {
+  flex-direction: column;
+  align-items: flex-start !important;
+}
+

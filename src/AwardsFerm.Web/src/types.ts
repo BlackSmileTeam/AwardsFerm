@@ -59,6 +59,7 @@ export interface SessionSlotConfig {
   stopAtMsk?: string | null
   autoRestart?: boolean
   proxyEnabled?: boolean
+  proxyId?: number | null
 }
 
 export interface SlotState {
@@ -95,6 +96,36 @@ export interface UserProfitSummary {
   totalTodayReward: number
   totalMonthReward: number
   accounts: AdAccount[]
+}
+
+export interface ProxyConfig {
+  id: number
+  name: string
+  scheme: string
+  host: string
+  port: number
+  login?: string | null
+  hasPassword: boolean
+  latitude?: number | null
+  longitude?: number | null
+  timezone?: string | null
+  locale?: string | null
+  locationLabel?: string | null
+  displayAddress: string
+}
+
+export interface CreateProxyRequest {
+  name: string
+  scheme: string
+  host: string
+  port: number
+  login?: string
+  password?: string
+  latitude?: number
+  longitude?: number
+  timezone?: string
+  locale?: string
+  locationLabel?: string
 }
 
 export function createEmptySlotState(): SlotState {
