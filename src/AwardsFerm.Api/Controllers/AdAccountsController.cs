@@ -46,6 +46,9 @@ public sealed class AdAccountsController : ControllerBase
     public async Task<ActionResult<AdAccountDto>> Create([FromBody] CreateAdAccountRequest request, CancellationToken ct)
     {
         var userId = GetUserId();
+        if (!await _db.Users.AnyAsync(x => x.Id == userId, ct))
+            return Unauthorized("Пользователь не найден. Выйдите и войдите снова.");
+
         var account = new AdAccountEntity
         {
             UserId = userId,
