@@ -710,8 +710,7 @@ function SessionCard({
           Прокси
         </label>
         {(config.proxyEnabled ?? true) && (
-          <label className="schedule-label proxy-select-label">
-            Прокси из списка
+          <div className="schedule-label proxy-select-label">
             <select
               className="proxy-select"
               value={config.proxyId ?? ''}
@@ -728,7 +727,7 @@ function SessionCard({
                 </option>
               ))}
             </select>
-          </label>
+          </div>
         )}
         <label className="schedule-label">
           <input
