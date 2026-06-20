@@ -797,7 +797,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
 
                 if (activePage.TryResolve(out var page) && page is not null)
                 {
-                    var frame = await SessionScreenshotHelper.CapturePageAsync(page, sessionCt);
+                    var frame = await _remoteInput.TryCaptureFrameAsync(profileId, sessionCt);
                     if (!string.IsNullOrWhiteSpace(frame))
                         _previewCoordinator.SetLastFrame(profileId, frame);
                 }

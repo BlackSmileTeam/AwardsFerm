@@ -17,7 +17,7 @@ internal static class SessionScreenshotHelper
                 Type = ScreenshotType.Jpeg,
                 Quality = 55,
                 FullPage = false,
-                Timeout = 15_000,
+                Timeout = 8_000,
                 Animations = ScreenshotAnimations.Disabled,
                 Caret = ScreenshotCaret.Hide
             });

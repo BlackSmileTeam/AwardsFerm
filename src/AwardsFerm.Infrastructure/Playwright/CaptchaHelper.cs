@@ -210,7 +210,7 @@ internal static class CaptchaHelper
                     : "⚠ Откройте «Просмотр» и пройдите капчу — автоматически она не решается"
             }, cancellationToken);
 
-            await WaitUntilResolvedAsync(page, sessionId, reporter, cancellationToken, maxWaitMinutes: 15);
+            await WaitUntilResolvedAsync(page, sessionId, reporter, cancellationToken, maxWaitMinutes: 15, manualOnly: true);
             return;
         }
 
@@ -285,7 +285,7 @@ internal static class CaptchaHelper
             Message = "⚠ Автоклик не помог — откройте «Просмотр» и кликните по капче…"
         }, cancellationToken);
 
-        await WaitUntilResolvedAsync(page, sessionId, reporter, cancellationToken, maxWaitMinutes);
+        await WaitUntilResolvedAsync(page, sessionId, reporter, cancellationToken, maxWaitMinutes, manualOnly: true);
     }
 
     private static async Task WaitUntilResolvedAsync(
@@ -293,7 +293,8 @@ internal static class CaptchaHelper
         string sessionId,
         ISessionEventReporter reporter,
         CancellationToken cancellationToken,
-        int maxWaitMinutes)
+        int maxWaitMinutes,
+        bool manualOnly = false)
     {
         var deadline = DateTimeOffset.UtcNow.AddMinutes(maxWaitMinutes);
         while (DateTimeOffset.UtcNow < deadline)
@@ -312,7 +313,7 @@ internal static class CaptchaHelper
                 return;
             }
 
-            if (!await RequiresManualSolveAsync(page) && await TryAutoSolveAsync(page, cancellationToken))
+            if (!manualOnly && !await RequiresManualSolveAsync(page) && await TryAutoSolveAsync(page, cancellationToken))
             {
                 await reporter.ReportAsync(new SessionEvent
                 {

@@ -836,6 +836,17 @@
   opacity: 0.85;
 }
 
+.preview-click-error {
+  margin: 0.35rem 0 0;
+  padding: 0.45rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid #d93025;
+  background: rgba(217, 48, 37, 0.1);
+  color: #f28b82;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
 .captcha-banner {
   margin: 0.65rem 0 0;
   padding: 0.55rem 0.75rem;

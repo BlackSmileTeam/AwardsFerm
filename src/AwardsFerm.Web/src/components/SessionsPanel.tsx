@@ -30,7 +30,7 @@ import {
   type SessionStatus,
   type SlotState,
 } from '../types'
-import { isCaptchaPending, hasActiveSessionError, normalizeStatus, statusCssClass, usePinnedScroll } from '../utils/session'
+import { isCaptchaPending, hasActiveSessionError, isSessionErrorResolvedLog, normalizeStatus, statusCssClass, usePinnedScroll } from '../utils/session'
 import { ServicesIndicator } from './ServicesIndicator'
 
 const statusLabels: Record<SessionStatus, string> = {
@@ -84,9 +84,15 @@ export function SessionsPanel() {
       let next: SlotState = { ...slot }
 
       if (event.type === 'Log' && event.message) {
+        const line = `[${formatTime(event.timestamp)}] ${event.message}`
+        const clearsError = isSessionErrorResolvedLog(line)
         next = {
           ...next,
-          logs: [...next.logs, `[${formatTime(event.timestamp)}] ${event.message}`],
+          logs: [...next.logs, line],
+          session:
+            next.session && clearsError
+              ? { ...next.session, errorMessage: undefined }
+              : next.session,
         }
       }
 
@@ -111,6 +117,7 @@ export function SessionsPanel() {
             ? {
                 ...next.session,
                 status: 'Running',
+                errorMessage: undefined,
                 currentStep: event.currentStep ?? next.session.currentStep,
                 totalSteps: event.totalSteps ?? next.session.totalSteps,
                 currentStepName: event.stepName ?? next.session.currentStepName,
@@ -173,7 +180,7 @@ export function SessionsPanel() {
             ? {
                 ...next.session,
                 status: next.session.autoRestart ? next.session.status : 'Failed',
-                errorMessage: event.message,
+                errorMessage: next.session.autoRestart ? undefined : event.message,
                 finishedAt: next.session.autoRestart ? undefined : new Date().toISOString(),
               }
             : next.session,
@@ -694,6 +701,7 @@ function SessionCard({
   const [diagnosticExpanded, setDiagnosticExpanded] = useState(true)
   const [menuOpen, setMenuOpen] = useState(false)
   const [clickPending, setClickPending] = useState(false)
+  const [clickError, setClickError] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewFullscreen, setPreviewFullscreen] = useState(false)
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -738,8 +746,8 @@ function SessionCard({
   }, [menuOpen])
 
   useEffect(() => {
-    if (!previewOpen) {
-      setPreviewWaiting(false)
+    if (!previewOpen || clickPending) {
+      if (!previewOpen) setPreviewWaiting(false)
       return
     }
     let cancelled = false
@@ -761,12 +769,13 @@ function SessionCard({
     }
 
     void pullFrame()
-    const id = window.setInterval(() => void pullFrame(), 800)
+    const intervalMs = captchaPending ? 1200 : 800
+    const id = window.setInterval(() => void pullFrame(), intervalMs)
     return () => {
       cancelled = true
       window.clearInterval(id)
     }
-  }, [previewOpen, config.profileId, onScreenshotUpdate])
+  }, [previewOpen, clickPending, captchaPending, config.profileId, onScreenshotUpdate])
 
   useEffect(() => {
     if (!previewFullscreen) return
@@ -826,6 +835,11 @@ function SessionCard({
     setPreviewFullscreen((prev) => !prev)
   }
 
+  useEffect(() => {
+    if (!captchaPending || previewOpen || !isOccupied) return
+    void openPreview()
+  }, [captchaPending, previewOpen, isOccupied, config.profileId, onScreenshotUpdate])
+
   const handleScreenshotClick = async (event: React.MouseEvent<HTMLImageElement>) => {
     const img = screenshotRef.current
     if (!img || clickPending) return
@@ -834,10 +848,18 @@ function SessionCard({
     if (!ratios) return
 
     setClickPending(true)
+    setClickError(null)
     try {
       await previewClickByProfile(config.profileId, ratios.xRatio, ratios.yRatio)
-    } catch {
-      /* ignore — next screenshot will refresh view */
+      try {
+        const frame = await fetchPreviewFrame(config.profileId)
+        if (frame) onScreenshotUpdate(frame)
+      } catch {
+        /* ignore frame refresh errors */
+      }
+    } catch (e) {
+      setClickError(e instanceof Error ? e.message : 'Не удалось отправить клик')
+      window.setTimeout(() => setClickError(null), 4000)
     } finally {
       window.setTimeout(() => setClickPending(false), 400)
     }
@@ -1157,6 +1179,7 @@ function SessionCard({
                   </button>
                 </div>
               </div>
+              {clickError && <div className="preview-click-error">{clickError}</div>}
               <div className={`browser-viewport${clickPending ? ' browser-viewport-clicking' : ''}`}>
                 {previewLoading ? (
                   <span className="screenshot-placeholder">Подключение просмотра…</span>

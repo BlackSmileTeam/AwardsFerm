@@ -168,6 +168,7 @@ public sealed class SessionExecutionService
             throw new InvalidOperationException("Включите «Просмотр», чтобы кликать по экрану браузера.");
 
         await _remoteInput.ClickAsync(profileId, xRatio, yRatio, cancellationToken);
+        _previewCoordinator.RequestImmediateCapture(profileId);
         _logger.LogDebug(
             "Profile {ProfileId}: удалённый клик ({X:P0}, {Y:P0})",
             profileId,

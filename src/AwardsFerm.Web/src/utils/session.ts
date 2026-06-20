@@ -125,8 +125,22 @@ export function isCaptchaPending(logs: string[], currentStep?: number): boolean 
 const SESSION_ERROR_LOG_RE =
   /✗|ошибка:|ERR_|сбой|failed|не удалось/i
 const SESSION_ERROR_IGNORE_RE = /будет перезапуск|перезапуск…|перезапущен/i
+const SESSION_ERROR_RESOLVED_RE =
+  /✓|игра загружена|обновили без перезапуска|страница временно не отвечала — обновили|CDN игры недоступен — перезагруз|yandex\.ru открыт|просмотрено новостей|открыта вкладка игры|страница загружена:|шаг \d+\/12:|игра \(непрерывный/i
 
-/** Активная сессия с ошибкой в логе или errorMessage. */
+function isSessionErrorLine(line: string): boolean {
+  if (SESSION_ERROR_IGNORE_RE.test(line)) return false
+  if (SESSION_ERROR_LOG_RE.test(line)) return true
+  if (/⚠/.test(line) && /диагностик/i.test(line)) return true
+  if (/⚠/.test(line)) return true
+  return false
+}
+
+export function isSessionErrorResolvedLog(line: string): boolean {
+  return SESSION_ERROR_RESOLVED_RE.test(line)
+}
+
+/** Активная сессия с нерешённой ошибкой (устаревшие записи в логе не учитываются). */
 export function hasActiveSessionError(
   status: unknown,
   logs: string[],
@@ -136,12 +150,14 @@ export function hasActiveSessionError(
   const isActive =
     normalized === 'Starting' || normalized === 'Running' || normalized === 'Paused'
   if (!isActive) return false
-  if (errorMessage) return true
-  return logs.some(
-    (l) =>
-      (SESSION_ERROR_LOG_RE.test(l) && !SESSION_ERROR_IGNORE_RE.test(l)) ||
-      (/⚠/.test(l) && /диагностик/i.test(l)),
-  )
+
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const line = logs[i]
+    if (isSessionErrorResolvedLog(line)) return false
+    if (isSessionErrorLine(line)) return true
+  }
+
+  return Boolean(errorMessage?.trim())
 }
 
 /** Автопрокрутка вниз только если пользователь у низа и не выделяет текст. */

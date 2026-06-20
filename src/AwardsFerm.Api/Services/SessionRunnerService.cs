@@ -149,7 +149,7 @@ public sealed class SessionRunnerService
         if (!await IsWorkerHealthyAsync(cancellationToken))
             throw new InvalidOperationException("Worker не запущен.");
 
-        var client = _httpClientFactory.CreateClient("worker-quick");
+        var client = _httpClientFactory.CreateClient("worker");
         var response = await client.PostAsJsonAsync(
             $"{GetWorkerBaseUrl()}/internal/preview/{profileId}/click",
             new { xRatio, yRatio },

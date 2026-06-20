@@ -53,7 +53,9 @@ public sealed class SessionRemoteInputCoordinator
 
             await page.BringToFrontAsync();
             await page.Mouse.MoveAsync(x, y);
-            await page.Mouse.ClickAsync(x, y);
+            await page.Mouse.DownAsync();
+            await Task.Delay(40);
+            await page.Mouse.UpAsync();
         }
         finally
         {
