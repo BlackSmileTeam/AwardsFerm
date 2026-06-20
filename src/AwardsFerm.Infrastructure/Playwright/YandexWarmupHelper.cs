@@ -176,6 +176,7 @@ internal static class YandexWarmupHelper
                 WaitUntil = WaitUntilState.DOMContentLoaded,
                 Timeout = 45_000
             });
+            await SessionNavigationHelper.WaitForVisibleContentAsync(page, cancellationToken: cancellationToken);
             await HumanBehavior.DelayAsync(2000, 4000, cancellationToken);
 
             if (page.Url.Equals(urlBefore, StringComparison.OrdinalIgnoreCase))

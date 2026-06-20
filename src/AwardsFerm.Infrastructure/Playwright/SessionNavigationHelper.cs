@@ -254,6 +254,35 @@ internal static class SessionNavigationHelper
         return false;
     }
 
+    public static async Task WaitForVisibleContentAsync(
+        IPage page,
+        int minChars = 80,
+        int timeoutMs = 25_000,
+        CancellationToken cancellationToken = default)
+    {
+        if (page.IsClosed)
+            return;
+
+        try
+        {
+            await page.WaitForFunctionAsync(
+                """
+                (min) => {
+                    const text = document.body?.innerText?.trim() ?? '';
+                    return text.length >= min;
+                }
+                """,
+                minChars,
+                new PageWaitForFunctionOptions { Timeout = timeoutMs });
+        }
+        catch
+        {
+            // Тяжёлые SPA (dzen.ru) могут грузить контент дольше — не блокируем сценарий.
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+    }
+
     private static bool IsRetryableNavigationError(Exception ex)
     {
         if (IsProxyNetworkError(ex))

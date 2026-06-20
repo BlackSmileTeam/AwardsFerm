@@ -93,10 +93,32 @@ internal static class SessionActivityWatchdog
                     return;
                 }
 
-                if (await IsPageUnresponsiveAsync(page))
+                var step = activity.CurrentStep;
+
+                if (step >= 12 &&
+                    (await YandexUiHelper.IsGameRunningAsync(page) || await CaptchaHelper.IsPresentAsync(page)))
+                {
+                    unresponsiveStreak = 0;
+                    activity.MarkActivity();
+                }
+                else if (await IsPageUnresponsiveAsync(page))
                 {
                     unresponsiveStreak++;
-                    if (unresponsiveStreak >= 2)
+
+                    if (unresponsiveStreak == 2 && step < 12 && await TryRecoverUnresponsivePageAsync(page))
+                    {
+                        unresponsiveStreak = 0;
+                        activity.MarkActivity();
+                        await reporter.ReportAsync(new Core.Models.SessionEvent
+                        {
+                            SessionId = sessionId,
+                            Type = Core.Models.SessionEventType.Log,
+                            Message = "Страница временно не отвечала — обновили без перезапуска браузера"
+                        }, cancellationToken);
+                        continue;
+                    }
+
+                    if (unresponsiveStreak >= 3)
                     {
                         await TriggerStallAsync(
                             sessionId,
@@ -110,10 +132,11 @@ internal static class SessionActivityWatchdog
 
                     continue;
                 }
+                else
+                {
+                    unresponsiveStreak = 0;
+                }
 
-                unresponsiveStreak = 0;
-
-                var step = activity.CurrentStep;
                 var stepIdle = DateTimeOffset.UtcNow - activity.StepStartedUtc;
                 var activityIdle = DateTimeOffset.UtcNow - activity.LastActivityUtc;
                 var threshold = step >= 12 ? GameStallThreshold : StepStallThreshold;
@@ -169,18 +192,60 @@ internal static class SessionActivityWatchdog
 
     private static async Task<bool> IsPageUnresponsiveAsync(IPage page)
     {
+        if (page.IsClosed)
+            return true;
+
+        var evaluateTask = page.EvaluateAsync<string>("() => document.readyState");
+        if (await Task.WhenAny(evaluateTask, Task.Delay(12_000)) == evaluateTask)
+        {
+            try
+            {
+                _ = await evaluateTask;
+                return false;
+            }
+            catch
+            {
+                return !await HasRecoverablePageContentAsync(page);
+            }
+        }
+
+        return !await HasRecoverablePageContentAsync(page);
+    }
+
+    private static async Task<bool> HasRecoverablePageContentAsync(IPage page)
+    {
+        if (page.IsClosed || SessionNavigationHelper.IsBrowserErrorPage(page.Url))
+            return false;
+
         try
         {
-            var task = page.EvaluateAsync<string>("() => document.readyState");
-            if (await Task.WhenAny(task, Task.Delay(8_000)) != task)
-                return true;
-
-            _ = await task;
-            return false;
+            var html = await page.ContentAsync();
+            return !string.IsNullOrWhiteSpace(html) && html.Length >= 200;
         }
         catch
         {
-            return true;
+            return false;
+        }
+    }
+
+    private static async Task<bool> TryRecoverUnresponsivePageAsync(IPage page)
+    {
+        if (page.IsClosed || SessionNavigationHelper.IsBrowserErrorPage(page.Url))
+            return false;
+
+        try
+        {
+            await page.ReloadAsync(new PageReloadOptions
+            {
+                WaitUntil = WaitUntilState.DOMContentLoaded,
+                Timeout = 45_000
+            });
+            await Task.Delay(2500);
+            return !await IsPageUnresponsiveAsync(page);
+        }
+        catch
+        {
+            return false;
         }
     }
 
