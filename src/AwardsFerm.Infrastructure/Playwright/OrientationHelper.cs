@@ -22,20 +22,29 @@ internal static class OrientationHelper
         DesktopProfile? profile = null,
         string? sessionId = null,
         ISessionEventReporter? reporter = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        LandscapeState? landscapeState = null,
+        SessionStuckTracker? stuckTracker = null)
     {
         if (page.IsClosed)
             return false;
 
-        var needsLandscape = await IsRotatePromptVisibleAsync(page);
+        var rotatePrompt = await IsRotatePromptVisibleAsync(page);
+        if (!rotatePrompt && landscapeState?.Applied == true)
+            return false;
+
+        var needsLandscape = rotatePrompt;
         if (!needsLandscape)
         {
             var vp = page.ViewportSize;
             needsLandscape = vp is not null && vp.Width < vp.Height;
+            if (!needsLandscape)
+            {
+                if (landscapeState is not null)
+                    landscapeState.Applied = true;
+                return false;
+            }
         }
-
-        if (!needsLandscape)
-            return false;
 
         var targetWidth = profile?.ViewportWidth ?? page.ViewportSize?.Width ?? 1280;
         var targetHeight = profile?.ViewportHeight ?? page.ViewportSize?.Height ?? 800;
@@ -44,7 +53,23 @@ internal static class OrientationHelper
 
         await ApplyLandscapeViewportAsync(page, context, targetWidth, targetHeight, profile, cancellationToken);
 
-        if (reporter is not null && sessionId is not null)
+        if (landscapeState is not null)
+            landscapeState.Applied = true;
+
+        if (stuckTracker is not null &&
+            stuckTracker.Register("landscape_rotate") &&
+            reporter is not null &&
+            sessionId is not null)
+        {
+            await SessionScreenDiagnostic.TriggerRestartAsync(
+                sessionId,
+                page,
+                "Повторяющийся поворот экрана без прогресса",
+                reporter,
+                cancellationToken);
+        }
+
+        if (reporter is not null && sessionId is not null && rotatePrompt)
         {
             await reporter.ReportAsync(new SessionEvent
             {

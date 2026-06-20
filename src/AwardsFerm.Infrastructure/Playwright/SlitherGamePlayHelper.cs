@@ -63,7 +63,9 @@ internal static class SlitherGamePlayHelper
         ISessionEventReporter reporter,
         ISessionPauseCoordinator pauseCoordinator,
         CancellationToken cancellationToken = default,
-        DesktopProfile? deviceProfile = null)
+        DesktopProfile? deviceProfile = null,
+        SessionStuckTracker? stuckTracker = null,
+        LandscapeState? landscapeState = null)
     {
         _ = minSeconds;
         _ = maxSeconds;
@@ -80,6 +82,8 @@ internal static class SlitherGamePlayHelper
             await HumanBehavior.DelayAsync(2000, 3500, cancellationToken);
         }
 
+        landscapeState ??= new LandscapeState { Applied = true };
+
         while (!cancellationToken.IsCancellationRequested)
         {
             await pauseCoordinator.WaitIfPausedAsync(profileId, sessionId, reporter, cancellationToken);
@@ -89,8 +93,15 @@ internal static class SlitherGamePlayHelper
 
             await page.BringToFrontAsync();
             await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, reporter, cancellationToken);
+
+            if (await YandexUiHelper.IsGameLoadErrorVisibleAsync(page))
+            {
+                await SessionScreenDiagnostic.TriggerRestartAsync(
+                    sessionId, page, "Ошибка загрузки игры во время игрового цикла", reporter, cancellationToken);
+            }
+
             await OrientationHelper.EnsureLandscapeForGameAsync(
-                page, context, deviceProfile, sessionId, reporter, cancellationToken);
+                page, context, deviceProfile, sessionId, reporter, cancellationToken, landscapeState, stuckTracker);
 
             if (await IsGameOverVisibleAsync(page))
             {
@@ -114,6 +125,23 @@ internal static class SlitherGamePlayHelper
                 }
 
                 continue;
+            }
+
+            if (!await YandexUiHelper.IsGameRunningAsync(page))
+            {
+                if (stuckTracker is not null && stuckTracker.Register("idle_no_game"))
+                {
+                    await SessionScreenDiagnostic.TriggerRestartAsync(
+                        sessionId,
+                        page,
+                        "Игра не отвечает — нет canvas, меню и экрана «Игра окончена»",
+                        reporter,
+                        cancellationToken);
+                }
+            }
+            else
+            {
+                stuckTracker?.Reset("idle_no_game");
             }
 
             // Игра идёт — рекламу не кликаем, только закрываем блокирующую полноэкранную

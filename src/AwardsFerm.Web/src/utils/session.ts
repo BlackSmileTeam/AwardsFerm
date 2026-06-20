@@ -34,8 +34,9 @@ const EVENT_TYPE_BY_NUMBER: Record<number, SessionEventType> = {
   3: 'StatusChanged',
   4: 'IpDetected',
   5: 'TrafficUpdated',
-  6: 'Completed',
-  7: 'Failed',
+  6: 'DiagnosticLog',
+  7: 'Completed',
+  8: 'Failed',
 }
 
 const EVENT_TYPE_ALIASES: Record<string, SessionEventType> = {
@@ -45,6 +46,7 @@ const EVENT_TYPE_ALIASES: Record<string, SessionEventType> = {
   statuschanged: 'StatusChanged',
   ipdetected: 'IpDetected',
   trafficupdated: 'TrafficUpdated',
+  diagnosticlog: 'DiagnosticLog',
   completed: 'Completed',
   failed: 'Failed',
   Log: 'Log',
@@ -53,6 +55,7 @@ const EVENT_TYPE_ALIASES: Record<string, SessionEventType> = {
   StatusChanged: 'StatusChanged',
   IpDetected: 'IpDetected',
   TrafficUpdated: 'TrafficUpdated',
+  DiagnosticLog: 'DiagnosticLog',
   Completed: 'Completed',
   Failed: 'Failed',
 }

@@ -23,6 +23,7 @@ export interface SessionInfo {
   startedAt?: string
   finishedAt?: string
   logs: string[]
+  diagnosticLogs?: string[]
 }
 
 export type SessionEventType =
@@ -32,6 +33,7 @@ export type SessionEventType =
   | 'StatusChanged'
   | 'IpDetected'
   | 'TrafficUpdated'
+  | 'DiagnosticLog'
   | 'Completed'
   | 'Failed'
 
@@ -65,6 +67,7 @@ export interface SessionSlotConfig {
 export interface SlotState {
   session: SessionInfo | null
   logs: string[]
+  diagnosticLogs: string[]
   loading: boolean
   screenshotBase64?: string | null
 }
@@ -134,5 +137,5 @@ export interface CreateProxyRequest {
 }
 
 export function createEmptySlotState(): SlotState {
-  return { session: null, logs: [], loading: false }
+  return { session: null, logs: [], diagnosticLogs: [], loading: false }
 }

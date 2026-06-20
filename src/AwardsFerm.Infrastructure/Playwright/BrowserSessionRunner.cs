@@ -358,6 +358,9 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
 
             await RunStepAsync(sessionId, profile.Id, 11, "Нажатие кнопки «Играть» и загрузка игры", sessionCt, async () =>
             {
+                var landscapeState = new LandscapeState();
+                var stuckTracker = new SessionStuckTracker();
+
                 var gamePage = await YandexUiHelper.EnterGameAsync(
                     context,
                     activePage!.Resolve(),
@@ -366,14 +369,32 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                     sessionId,
                     _eventReporter,
                     sessionCt,
-                    sessionProfile);
+                    sessionProfile,
+                    landscapeState,
+                    stuckTracker);
 
                 activePage!.Page = gamePage;
                 await YandexUiHelper.WaitForGameFullyLoadedAsync(
-                    gamePage, sessionCt, context: context, profile: sessionProfile,
-                    sessionId: sessionId, reporter: _eventReporter);
-                await OrientationHelper.EnsureLandscapeForGameAsync(
-                    gamePage, context, sessionProfile, sessionId, _eventReporter, sessionCt);
+                    gamePage,
+                    sessionCt,
+                    context: context,
+                    profile: sessionProfile,
+                    sessionId: sessionId,
+                    reporter: _eventReporter,
+                    landscapeState: landscapeState,
+                    stuckTracker: stuckTracker);
+
+                if (await YandexUiHelper.IsGameLoadErrorVisibleAsync(gamePage) ||
+                    !await YandexUiHelper.IsGameRunningAsync(gamePage))
+                {
+                    await SessionScreenDiagnostic.TriggerRestartAsync(
+                        sessionId,
+                        gamePage,
+                        "Игра не запустилась — на экране нет игрового canvas",
+                        _eventReporter,
+                        sessionCt);
+                }
+
                 await ReportLogAsync(sessionId, "✓ Игра загружена (экран «Загрузка» завершён)", sessionCt);
             });
 
@@ -385,12 +406,18 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
             await RunStepAsync(sessionId, profile.Id, 12, "Игра (непрерывный цикл)", sessionCt, async () =>
             {
                 page = activePage!.Resolve();
+                var landscapeState = new LandscapeState { Applied = true };
+                var stuckTracker = new SessionStuckTracker();
 
                 await YandexUiHelper.WaitForGameFullyLoadedAsync(
-                    page, sessionCt, context: context, profile: sessionProfile,
-                    sessionId: sessionId, reporter: _eventReporter);
-                await OrientationHelper.EnsureLandscapeForGameAsync(
-                    page, context, sessionProfile, sessionId, _eventReporter, sessionCt);
+                    page,
+                    sessionCt,
+                    context: context,
+                    profile: sessionProfile,
+                    sessionId: sessionId,
+                    reporter: _eventReporter,
+                    landscapeState: landscapeState,
+                    stuckTracker: stuckTracker);
 
                 playGameOverCount = 0;
                 var playOutcome = await SlitherGamePlayHelper.PlaySessionAsync(
@@ -403,7 +430,9 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                     _eventReporter,
                     _pauseCoordinator,
                     sessionCt,
-                    sessionProfile);
+                    sessionProfile,
+                    stuckTracker,
+                    landscapeState);
                 playGameOverCount = playOutcome.GamesPlayed;
 
                 if (playOutcome.RotateSession)
@@ -422,6 +451,10 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
 
             await _cookieStore.SaveAsync(context, sessionProfile!.CookiesPath, sessionCt);
             return SessionRunResult.Completed(playGameOverCount);
+        }
+        catch (SessionStuckException ex)
+        {
+            return SessionRunResult.RestartAfterDiagnostic(playGameOverCount, ex.Message);
         }
         catch (OperationCanceledException)
         {

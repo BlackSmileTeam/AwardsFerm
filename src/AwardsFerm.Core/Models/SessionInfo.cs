@@ -17,4 +17,5 @@ public sealed class SessionInfo
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
     public List<string> Logs { get; set; } = [];
+    public List<string> DiagnosticLogs { get; set; } = [];
 }

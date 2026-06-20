@@ -201,6 +201,10 @@ public sealed class SessionManager
                 case SessionEventType.Log when sessionEvent.Message is not null:
                     session.Logs.Add($"[{sessionEvent.Timestamp:HH:mm:ss}] {sessionEvent.Message}");
                     break;
+                case SessionEventType.DiagnosticLog when sessionEvent.Message is not null:
+                    session.DiagnosticLogs.Add($"[{sessionEvent.Timestamp:HH:mm:ss}]\n{sessionEvent.Message}");
+                    session.Logs.Add($"[{sessionEvent.Timestamp:HH:mm:ss}] ⚠ Диагностика: см. отдельный лог");
+                    break;
                 case SessionEventType.StepChanged:
                     session.CurrentStep = sessionEvent.CurrentStep ?? session.CurrentStep;
                     session.TotalSteps = sessionEvent.TotalSteps ?? session.TotalSteps;
@@ -274,7 +278,8 @@ public sealed class SessionManager
         TrafficBytes = source.TrafficBytes,
         StartedAt = source.StartedAt,
         FinishedAt = source.FinishedAt,
-        Logs = [..source.Logs]
+        Logs = [..source.Logs],
+        DiagnosticLogs = [..source.DiagnosticLogs]
     };
 
     private void SaveIpAudit(SessionInfo session, string publicIp)

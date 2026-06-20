@@ -412,6 +412,30 @@
   min-height: 160px;
 }
 
+.diagnostic-log-header {
+  margin-top: 0.75rem;
+}
+
+.diagnostic-log {
+  height: 180px;
+  min-height: 120px;
+  background: #1a1d23;
+  border-color: #5c4a1f;
+}
+
+.diagnostic-entry {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.6rem;
+  background: rgba(253, 214, 99, 0.06);
+  border-left: 2px solid #fdd663;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: #e8eaed;
+}
+
 .log-line-warn {
   color: #fdd663;
 }

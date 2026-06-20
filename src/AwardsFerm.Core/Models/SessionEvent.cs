@@ -8,6 +8,7 @@ public enum SessionEventType
     StatusChanged,
     IpDetected,
     TrafficUpdated,
+    DiagnosticLog,
     Completed,
     Failed
 }

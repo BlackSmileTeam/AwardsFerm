@@ -122,13 +122,15 @@ internal static class YandexUiHelper
         string sessionId,
         ISessionEventReporter reporter,
         CancellationToken cancellationToken = default,
-        DesktopProfile? profile = null)
+        DesktopProfile? profile = null,
+        LandscapeState? landscapeState = null,
+        SessionStuckTracker? stuckTracker = null)
     {
         page = await ReacquireGamePageAsync(context, page, gameUrl, targetUrlPart, cancellationToken);
         await FocusGameTabAsync(context, page, cancellationToken);
         await page.BringToFrontAsync();
         await OrientationHelper.EnsureLandscapeForGameAsync(
-            page, context, profile, sessionId, reporter, cancellationToken);
+            page, context, profile, sessionId, reporter, cancellationToken, landscapeState, stuckTracker);
 
         if (await IsGameRunningAsync(page))
             return page;
@@ -155,7 +157,7 @@ internal static class YandexUiHelper
             await DismissPopupsAsync(page, cancellationToken);
             await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, reporter, cancellationToken);
             await OrientationHelper.EnsureLandscapeForGameAsync(
-                page, context, profile, sessionId, reporter, cancellationToken);
+                page, context, profile, sessionId, reporter, cancellationToken, landscapeState, stuckTracker);
 
             if (await IsGameRunningAsync(page))
                 return page;
@@ -192,7 +194,10 @@ internal static class YandexUiHelper
             }
             else if (await IsLoadingScreenAsync(page))
             {
-                await WaitForGameFullyLoadedAsync(page, cancellationToken);
+                await WaitForGameFullyLoadedAsync(
+                    page, cancellationToken, context: context, profile: profile,
+                    sessionId: sessionId, reporter: reporter,
+                    landscapeState: landscapeState, stuckTracker: stuckTracker);
                 if (await IsGameRunningAsync(page))
                     return page;
                 continue;
@@ -202,7 +207,10 @@ internal static class YandexUiHelper
                 // Ни рекламы, ни play-guard — возможно guard уже принят, ждём загрузку.
                 try
                 {
-                    await WaitForGameFullyLoadedAsync(page, cancellationToken);
+                    await WaitForGameFullyLoadedAsync(
+                        page, cancellationToken, context: context, profile: profile,
+                        sessionId: sessionId, reporter: reporter,
+                        landscapeState: landscapeState, stuckTracker: stuckTracker);
                     if (await IsGameRunningAsync(page))
                         return page;
                 }
@@ -255,7 +263,10 @@ internal static class YandexUiHelper
 
             try
             {
-                await WaitForGameFullyLoadedAsync(page, cancellationToken);
+                await WaitForGameFullyLoadedAsync(
+                    page, cancellationToken, context: context, profile: profile,
+                    sessionId: sessionId, reporter: reporter,
+                    landscapeState: landscapeState, stuckTracker: stuckTracker);
                 if (await IsGameRunningAsync(page))
                     return page;
             }
@@ -326,44 +337,83 @@ internal static class YandexUiHelper
         IBrowserContext? context = null,
         DesktopProfile? profile = null,
         string? sessionId = null,
-        ISessionEventReporter? reporter = null)
+        ISessionEventReporter? reporter = null,
+        LandscapeState? landscapeState = null,
+        SessionStuckTracker? stuckTracker = null)
     {
         if (page.IsClosed)
             throw new InvalidOperationException("Страница игры закрыта.");
 
         var deadline = DateTimeOffset.UtcNow.AddSeconds(maxWaitSeconds);
         var sawLoading = false;
+        DateTimeOffset? loadingSince = null;
 
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            if (await IsGameLoadErrorVisibleAsync(page) &&
+                reporter is not null && sessionId is not null)
+            {
+                await SessionScreenDiagnostic.TriggerRestartAsync(
+                    sessionId, page, "Ошибка загрузки игры на экране", reporter, cancellationToken);
+            }
+
             if (context is not null)
             {
                 await OrientationHelper.EnsureLandscapeForGameAsync(
-                    page, context, profile, sessionId, reporter, cancellationToken);
+                    page, context, profile, sessionId, reporter, cancellationToken,
+                    landscapeState, stuckTracker);
             }
 
             if (await IsFullscreenAdVisibleAsync(page))
             {
+                if (stuckTracker is not null &&
+                    stuckTracker.Register("fullscreen_ad") &&
+                    reporter is not null && sessionId is not null)
+                {
+                    await SessionScreenDiagnostic.TriggerRestartAsync(
+                        sessionId,
+                        page,
+                        "Повторяющееся закрытие полноэкранной рекламы без прогресса",
+                        reporter,
+                        cancellationToken);
+                }
+
                 await DismissFullscreenAdAsync(page, cancellationToken);
                 continue;
             }
 
+            stuckTracker?.Reset("fullscreen_ad");
+
             if (await IsLoadingScreenAsync(page))
             {
                 sawLoading = true;
+                loadingSince ??= DateTimeOffset.UtcNow;
+                if (loadingSince is not null &&
+                    DateTimeOffset.UtcNow - loadingSince.Value > TimeSpan.FromSeconds(90) &&
+                    reporter is not null && sessionId is not null)
+                {
+                    await SessionScreenDiagnostic.TriggerRestartAsync(
+                        sessionId,
+                        page,
+                        "Загрузка игры длится более 90 секунд",
+                        reporter,
+                        cancellationToken);
+                }
+
                 await Task.Delay(1000, cancellationToken);
                 continue;
             }
 
-            if (await IsGameRunningAsync(page))
+            loadingSince = null;
+
+            if (await IsGameRunningAsync(page) && !await IsGameLoadErrorVisibleAsync(page))
             {
                 await HumanBehavior.DelayAsync(2000, 3000, cancellationToken);
                 return;
             }
 
-            // Если загрузка уже была или прошло достаточно времени — ждём canvas
             if (sawLoading || DateTimeOffset.UtcNow > deadline.AddSeconds(-maxWaitSeconds + 15))
             {
                 await Task.Delay(1000, cancellationToken);
@@ -373,11 +423,67 @@ internal static class YandexUiHelper
             await Task.Delay(800, cancellationToken);
         }
 
-        if (await IsGameRunningAsync(page))
+        if (await IsGameRunningAsync(page) && !await IsGameLoadErrorVisibleAsync(page))
             return;
+
+        if (reporter is not null && sessionId is not null)
+        {
+            await SessionScreenDiagnostic.TriggerRestartAsync(
+                sessionId,
+                page,
+                $"Игра не загрузилась за {maxWaitSeconds} сек",
+                reporter,
+                cancellationToken);
+        }
 
         throw new TimeoutException(
             $"Игра не загрузилась за {maxWaitSeconds} сек (экран «Загрузка» или canvas не появился).");
+    }
+
+    public static async Task<bool> IsGameLoadErrorVisibleAsync(IPage page)
+    {
+        if (page.IsClosed)
+            return false;
+
+        var errorTexts =
+            new[]
+            {
+                "ошибка загрузки",
+                "не удалось загрузить",
+                "ошибка при загрузке",
+                "что-то пошло не так",
+                "failed to load",
+                "loading error",
+                "something went wrong",
+                "try again",
+                "повторить"
+            };
+
+        try
+        {
+            foreach (var text in errorTexts)
+            {
+                var locator = page.GetByText(text, new PageGetByTextOptions { Exact = false });
+                if (await locator.CountAsync() > 0 && await locator.First.IsVisibleAsync())
+                    return true;
+            }
+
+            foreach (var frame in page.Frames)
+            {
+                foreach (var text in errorTexts)
+                {
+                    var locator = frame.GetByText(text, new FrameGetByTextOptions { Exact = false });
+                    if (await locator.CountAsync() > 0 && await locator.First.IsVisibleAsync())
+                        return true;
+                }
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return false;
     }
 
     private static async Task<bool> IsPlayGuardDialogVisibleAsync(IPage page)

@@ -85,6 +85,20 @@ export function SessionsPanel() {
         }
       }
 
+      if (event.type === 'DiagnosticLog' && event.message) {
+        next = {
+          ...next,
+          diagnosticLogs: [
+            ...next.diagnosticLogs,
+            `[${formatTime(event.timestamp)}]\n${event.message}`,
+          ],
+          logs: [
+            ...next.logs,
+            `[${formatTime(event.timestamp)}] ⚠ Диагностика: см. отдельный лог`,
+          ],
+        }
+      }
+
       if (event.type === 'StepChanged') {
         next = {
           ...next,
@@ -242,6 +256,10 @@ export function SessionsPanel() {
             ...next[cfg.profileId],
             session: display,
             logs: display.logs.length > 0 ? display.logs : next[cfg.profileId]?.logs ?? [],
+            diagnosticLogs:
+              display.diagnosticLogs?.length > 0
+                ? display.diagnosticLogs
+                : next[cfg.profileId]?.diagnosticLogs ?? [],
           }
         }
       }
@@ -313,6 +331,7 @@ export function SessionsPanel() {
         [profileId]: {
           session,
           logs: [`[${formatTime(new Date().toISOString())}] Сессия ${session.id.slice(0, 8)}… запущена`],
+          diagnosticLogs: [],
           loading: false,
         },
       }))
@@ -581,7 +600,9 @@ function SessionCard({
   onPreviewChange: (open: boolean) => void
 }) {
   const logViewRef = useRef<HTMLDivElement>(null)
+  const diagnosticViewRef = useRef<HTMLDivElement>(null)
   const [copied, setCopied] = useState(false)
+  const [diagnosticCopied, setDiagnosticCopied] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const sessionStatus = normalizeStatus(state.session?.status)
   const isRunning = sessionStatus === 'Starting' || sessionStatus === 'Running'
@@ -599,11 +620,20 @@ function SessionCard({
   }, [isRunning])
   const durationText = formatDuration(state.session?.startedAt, state.session?.finishedAt, isRunning)
   const displayLogs = state.logs.length > 0 ? state.logs : state.session?.logs ?? []
+  const displayDiagnosticLogs =
+    state.diagnosticLogs.length > 0
+      ? state.diagnosticLogs
+      : state.session?.diagnosticLogs ?? []
 
   useEffect(() => {
     const el = logViewRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [displayLogs])
+
+  useEffect(() => {
+    const el = diagnosticViewRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [displayDiagnosticLogs])
 
   useEffect(() => {
     if (!isOccupied && previewOpen) {
@@ -640,6 +670,33 @@ function SessionCard({
       }
       setCopied(true)
       window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const copyDiagnosticLogs = async () => {
+    if (displayDiagnosticLogs.length === 0) return
+    const text = displayDiagnosticLogs.join('\n\n')
+    try {
+      if (window.isSecureContext && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        const textarea = document.createElement('textarea')
+        textarea.value = text
+        textarea.setAttribute('readonly', '')
+        textarea.style.position = 'fixed'
+        textarea.style.top = '-9999px'
+        textarea.style.opacity = '0'
+        document.body.appendChild(textarea)
+        textarea.focus()
+        textarea.select()
+        const copied = document.execCommand('copy')
+        document.body.removeChild(textarea)
+        if (!copied) throw new Error('copy failed')
+      }
+      setDiagnosticCopied(true)
+      window.setTimeout(() => setDiagnosticCopied(false), 2000)
     } catch {
       /* ignore */
     }
@@ -857,6 +914,44 @@ function SessionCard({
           ))
         )}
       </div>
+
+      {displayDiagnosticLogs.length > 0 && (
+        <>
+          <div className="log-panel-header diagnostic-log-header">
+            <span className="log-panel-title">Диагностика</span>
+            <button
+              type="button"
+              className={`btn-icon${diagnosticCopied ? ' btn-icon-ok' : ''}`}
+              onClick={() => void copyDiagnosticLogs()}
+              title={diagnosticCopied ? 'Скопировано' : 'Копировать диагностику'}
+              aria-label="Копировать диагностику"
+            >
+              {diagnosticCopied ? (
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path
+                    fill="currentColor"
+                    d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"
+                  />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path
+                    fill="currentColor"
+                    d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
+                  />
+                </svg>
+              )}
+            </button>
+          </div>
+          <div ref={diagnosticViewRef} className="log-view session-log diagnostic-log">
+            {displayDiagnosticLogs.map((entry, i) => (
+              <pre key={i} className="diagnostic-entry">
+                {entry}
+              </pre>
+            ))}
+          </div>
+        </>
+      )}
     </section>
   )
 }

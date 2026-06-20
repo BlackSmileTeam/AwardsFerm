@@ -198,6 +198,13 @@ public sealed class SessionExecutionService
                             execution.ProfileId,
                             result.GameOverCount);
                     }
+                    else if (result.AutoRestartAfterDiagnostic)
+                    {
+                        _logger.LogInformation(
+                            "Profile {ProfileId}: диагностический перезапуск — {Reason}",
+                            execution.ProfileId,
+                            result.DiagnosticReason ?? "зависание");
+                    }
                 }
                 catch (OperationCanceledException) when (execution.Cts.Token.IsCancellationRequested)
                 {
