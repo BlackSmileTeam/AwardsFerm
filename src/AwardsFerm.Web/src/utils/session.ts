@@ -85,3 +85,38 @@ export function normalizeSession(session: SessionInfo): SessionInfo {
 export function statusCssClass(status: unknown): string {
   return normalizeStatus(status).toLowerCase()
 }
+
+const CAPTCHA_PENDING_RE =
+  /обнаружена капча|автоклик не помог|showcaptcha|капча «я не робот»/i
+const CAPTCHA_RESOLVED_RE =
+  /капча пройдена|галочка нажата|продолжаем сценарий/i
+const PROGRESS_AFTER_CAPTCHA_RE =
+  /yandex\.ru открыт|переход на яндекс игры|просмотрено новостей|открыта вкладка игры|шаг [2-9]\/12|шаг 1[0-2]\/12/i
+
+/** Баннер капчи скрывается после прохождения или когда сценарий снова движется вперёд. */
+export function isCaptchaPending(logs: string[], currentStep?: number): boolean {
+  let pending = false
+  let captchaIndex = -1
+
+  for (let i = 0; i < logs.length; i++) {
+    const line = logs[i]
+    if (CAPTCHA_RESOLVED_RE.test(line)) {
+      pending = false
+      captchaIndex = -1
+      continue
+    }
+    if (CAPTCHA_PENDING_RE.test(line)) {
+      pending = true
+      captchaIndex = i
+    }
+  }
+
+  if (!pending || captchaIndex < 0) return false
+
+  const after = logs.slice(captchaIndex + 1)
+  if (after.some((l) => CAPTCHA_RESOLVED_RE.test(l))) return false
+  if (after.some((l) => PROGRESS_AFTER_CAPTCHA_RE.test(l))) return false
+  if (currentStep != null && currentStep > 1) return false
+
+  return true
+}

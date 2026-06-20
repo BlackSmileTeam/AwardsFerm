@@ -87,11 +87,15 @@ internal static class SessionNetworkHelper
         IPage page,
         CancellationToken cancellationToken = default)
     {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(45));
+        var linkedCt = timeoutCts.Token;
+
         ProxyConnectivityResult? lastFailure = null;
 
         foreach (var url in IpCheckUrls)
         {
-            var result = await TryCheckUrlAsync(page, url, cancellationToken);
+            var result = await TryCheckUrlAsync(page, url, linkedCt);
             if (result.IsSuccess)
                 return result;
 
@@ -99,6 +103,48 @@ internal static class SessionNetworkHelper
         }
 
         return lastFailure ?? new ProxyConnectivityResult();
+    }
+
+    /// <summary>Проверяет, что целевой сайт открывается через прокси (не только IP-check).</summary>
+    public static async Task<bool> ProbeTargetReachableAsync(
+        IPage page,
+        string url,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await page.GotoAsync(url, new PageGotoOptions
+            {
+                Timeout = 25_000,
+                WaitUntil = WaitUntilState.Commit
+            });
+
+            if (SessionNavigationHelper.IsBrowserErrorPage(page.Url))
+                return false;
+
+            if (Uri.TryCreate(url, UriKind.Absolute, out var expected))
+            {
+                var host = expected.Host;
+                var current = page.Url;
+                if (current.Contains(host, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                if (host.Contains("yandex.", StringComparison.OrdinalIgnoreCase) &&
+                    (current.Contains("yandex.", StringComparison.OrdinalIgnoreCase) ||
+                     current.Contains("dzen.", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
+                }
+
+                return false;
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static async Task<ProxyConnectivityResult> TryCheckUrlAsync(

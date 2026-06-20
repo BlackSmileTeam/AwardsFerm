@@ -19,6 +19,7 @@ public static class DependencyInjection
         services.AddSingleton<ISessionPauseCoordinator, SessionPauseCoordinator>();
         services.AddSingleton<ISessionPreviewCoordinator, SessionPreviewCoordinator>();
         services.AddSingleton<SessionRemoteInputCoordinator>();
+        services.AddSingleton<IProxyIpChangeCoordinator, ProxyIpChangeCoordinator>();
         services.AddSingleton<IBrowserSessionRunner, BrowserSessionRunner>();
         return services;
     }

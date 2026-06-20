@@ -542,6 +542,36 @@
   flex-shrink: 0;
 }
 
+.session-preview-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.preview-help-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  padding: 0;
+  border: 1px solid #5f6368;
+  border-radius: 50%;
+  background: transparent;
+  color: #9aa0a6;
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: help;
+  flex-shrink: 0;
+}
+
+.preview-help-btn:hover {
+  color: #e8eaed;
+  border-color: #8ab4f8;
+}
+
 .session-preview-fullscreen {
   position: fixed;
   inset: 0;
@@ -565,13 +595,6 @@
   aspect-ratio: unset;
   min-height: 0;
   border-radius: 10px;
-}
-
-.session-preview-fullscreen .preview-hint {
-  flex-shrink: 0;
-  margin-top: 0.6rem;
-  font-size: 0.8rem;
-  text-align: center;
 }
 
 .btn-preview {
@@ -614,12 +637,6 @@
 
 .browser-viewport-clicking .screenshot-interactive {
   opacity: 0.85;
-}
-
-.preview-hint {
-  margin: 0.4rem 0 0;
-  font-size: 0.72rem;
-  color: #9aa0a6;
 }
 
 .captcha-banner {

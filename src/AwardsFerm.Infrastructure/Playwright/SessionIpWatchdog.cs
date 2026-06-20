@@ -16,11 +16,14 @@ internal static class SessionIpWatchdog
 
     public static Task RunAsync(
         string sessionId,
+        string profileId,
         ActivePageHolder activePage,
         string baselineIp,
+        string? proxyHostKey,
         IpChangeDetectorState state,
         CancellationTokenSource ipChangeCts,
         ISessionEventReporter reporter,
+        IProxyIpChangeCoordinator? proxyIpCoordinator,
         CancellationToken cancellationToken)
     {
         return Task.Run(async () =>
@@ -79,6 +82,11 @@ internal static class SessionIpWatchdog
                 catch
                 {
                     // ignore reporting errors
+                }
+
+                if (proxyHostKey is not null && proxyIpCoordinator is not null)
+                {
+                    proxyIpCoordinator.NotifyIpChanged(proxyHostKey, profileId, currentIp, nextIp);
                 }
 
                 ipChangeCts.Cancel();

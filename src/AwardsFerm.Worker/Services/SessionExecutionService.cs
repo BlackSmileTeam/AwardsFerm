@@ -184,12 +184,13 @@ public sealed class SessionExecutionService
 
     private async Task RunProfileLoopAsync(ProfileExecution execution, YandexGamesSearchOptions options)
     {
-        var restartDelay = TimeSpan.FromSeconds(5);
+        var defaultRestartDelay = TimeSpan.FromSeconds(5);
 
         try
         {
             while (!execution.Cts.Token.IsCancellationRequested)
             {
+                var restartDelay = defaultRestartDelay;
                 try
                 {
                     var profile = await _profileRepository.GetByIdAsync(execution.ProfileId, execution.Cts.Token)
@@ -231,6 +232,11 @@ public sealed class SessionExecutionService
                             "Profile {ProfileId}: диагностический перезапуск — {Reason}",
                             execution.ProfileId,
                             result.DiagnosticReason ?? "зависание");
+                        restartDelay = TimeSpan.FromSeconds(2);
+                    }
+                    else if (result.BrowserClosedUnexpectedly)
+                    {
+                        restartDelay = TimeSpan.FromSeconds(1);
                     }
                 }
                 catch (OperationCanceledException) when (execution.Cts.Token.IsCancellationRequested)

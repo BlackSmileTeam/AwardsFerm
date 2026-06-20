@@ -30,7 +30,7 @@ import {
   type SessionStatus,
   type SlotState,
 } from '../types'
-import { normalizeStatus, statusCssClass } from '../utils/session'
+import { isCaptchaPending, normalizeStatus, statusCssClass } from '../utils/session'
 import { ServicesIndicator } from './ServicesIndicator'
 
 const statusLabels: Record<SessionStatus, string> = {
@@ -633,8 +633,9 @@ function SessionCard({
     state.diagnosticLogs.length > 0
       ? state.diagnosticLogs
       : state.session?.diagnosticLogs ?? []
-  const captchaPending = displayLogs.some((line) =>
-    /обнаружена капча|автоклик не помог|showcaptcha/i.test(line),
+  const captchaPending = isCaptchaPending(
+    displayLogs,
+    state.session?.currentStep,
   )
 
   useEffect(() => {
@@ -958,11 +959,25 @@ function SessionCard({
               className={`session-preview${previewFullscreen ? ' session-preview-fullscreen' : ''}`}
             >
               <div className="session-preview-header">
-                <span>
-                  Экран браузера
-                  {captchaPending ? ' — кликните по капче' : ''}
-                  {previewFullscreen ? ' (полный экран)' : ''}
-                </span>
+                <div className="session-preview-title">
+                  <span>
+                    Экран браузера
+                    {captchaPending ? ' — кликните по капче' : ''}
+                    {previewFullscreen ? ' (полный экран)' : ''}
+                  </span>
+                  <button
+                    type="button"
+                    className="preview-help-btn"
+                    title={
+                      captchaPending
+                        ? 'Кликните по галочке «Я не робот». Клики по изображению передаются в браузер. «Закрыть просмотр» — выключить трансляцию. Esc — выйти из полного экрана.'
+                        : 'Клики по изображению передаются в браузер. «Закрыть просмотр» — выключить трансляцию'
+                    }
+                    aria-label="Подсказка по просмотру"
+                  >
+                    ?
+                  </button>
+                </div>
                 <div className="session-preview-actions">
                   <button
                     type="button"
@@ -993,11 +1008,6 @@ function SessionCard({
                   <span className="screenshot-placeholder">Ожидание кадра… (обновление каждую секунду)</span>
                 )}
               </div>
-              <p className="preview-hint">
-                {captchaPending
-                  ? 'Кликните по галочке «Я не робот». Esc — выйти из полного экрана'
-                  : 'Клики по изображению передаются в браузер. «Закрыть просмотр» — выключить трансляцию'}
-              </p>
             </div>
           )
 

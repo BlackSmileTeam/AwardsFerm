@@ -16,6 +16,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
     private readonly ISessionPauseCoordinator _pauseCoordinator;
     private readonly ISessionPreviewCoordinator _previewCoordinator;
     private readonly SessionRemoteInputCoordinator _remoteInput;
+    private readonly IProxyIpChangeCoordinator _proxyIpCoordinator;
     private readonly string _profilesRoot;
 
     public BrowserSessionRunner(
@@ -25,6 +26,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
         ISessionPauseCoordinator pauseCoordinator,
         ISessionPreviewCoordinator previewCoordinator,
         SessionRemoteInputCoordinator remoteInput,
+        IProxyIpChangeCoordinator proxyIpCoordinator,
         ProfileRepository profileRepository)
     {
         _browserFactory = browserFactory;
@@ -33,6 +35,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
         _pauseCoordinator = pauseCoordinator;
         _previewCoordinator = previewCoordinator;
         _remoteInput = remoteInput;
+        _proxyIpCoordinator = proxyIpCoordinator;
         _profilesRoot = profileRepository.ProfilesRoot;
     }
 
@@ -59,6 +62,8 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
         var sessionCt = linkedSessionCts.Token;
         var ipChangeState = new IpChangeDetectorState();
         string? sessionBaselineIp = null;
+        string? sessionProxyHostKey = null;
+        IDisposable? proxyIpRegistration = null;
 
         try
         {
@@ -146,6 +151,27 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                             $"Локация: {SessionLocationHelper.Format(sessionProfile)}",
                             sessionCt);
                     }
+
+                    await ReportLogAsync(sessionId, "Проверка доступа к yandex.ru через прокси…", sessionCt);
+                    if (!await SessionNetworkHelper.ProbeTargetReachableAsync(page, "https://yandex.ru/", sessionCt))
+                    {
+                        ProxyRotator.ReportFailure(sessionProfile.ProxyUrl);
+                        await ReportLogAsync(
+                            sessionId,
+                            $"Прокси не открывает yandex.ru — попытка {proxyTry + 1}/{maxProxyAttempts}. " +
+                            ProxyUrlHelper.DescribeProxyFailureHint(sessionProfile.ProxyUrl, "ERR_TUNNEL_CONNECTION_FAILED"),
+                            sessionCt);
+
+                        accumulatedTrafficBytes += trafficMonitor?.TotalBytes ?? 0;
+                        if (trafficMonitor is not null)
+                            await trafficMonitor.DisposeAsync();
+                        trafficMonitor = null;
+                        await launch.DisposeAsync();
+                        launch = null;
+                        continue;
+                    }
+
+                    await ReportLogAsync(sessionId, "yandex.ru доступен через прокси", sessionCt);
                 }
                 else
                 {
@@ -202,13 +228,36 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
 
             if (useProxy && sessionBaselineIp is not null && activePage is not null)
             {
+                sessionProxyHostKey = ProxyUrlHelper.ExtractHostKey(sessionProfile!.ProxyUrl);
+                if (sessionProxyHostKey is not null)
+                {
+                    proxyIpRegistration = _proxyIpCoordinator.RegisterSession(new ProxyIpSessionRegistration
+                    {
+                        ProfileId = profile.Id,
+                        SessionId = sessionId,
+                        ProxyHostKey = sessionProxyHostKey,
+                        BaselineIp = sessionBaselineIp,
+                        Reporter = _eventReporter,
+                        OnRemoteIpChange = (oldIp, newIp) =>
+                        {
+                            ipChangeState.Changed = true;
+                            ipChangeState.OldIp = oldIp;
+                            ipChangeState.NewIp = newIp;
+                            ipChangeCts.Cancel();
+                        }
+                    });
+                }
+
                 _ = SessionIpWatchdog.RunAsync(
                     sessionId,
+                    profile.Id,
                     activePage,
                     sessionBaselineIp,
+                    sessionProxyHostKey,
                     ipChangeState,
                     ipChangeCts,
                     _eventReporter,
+                    _proxyIpCoordinator,
                     sessionCt);
                 await ReportLogAsync(sessionId, "Мониторинг смены IP прокси включён (проверка каждые 2 мин)", sessionCt);
             }
@@ -221,6 +270,8 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                     page,
                     "https://yandex.ru/",
                     sessionCt,
+                    attempts: 2,
+                    timeoutMs: 35_000,
                     onProgress: msg => ReportLogAsync(sessionId, msg, sessionCt));
                 await ReportLogAsync(sessionId, "yandex.ru открыт", sessionCt);
                 await HumanBehavior.DelayAsync(3000, 5000, sessionCt);
@@ -487,10 +538,21 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
 
             if (ipChangeState.Changed && !cancellationToken.IsCancellationRequested)
             {
-                await ReportLogAsync(
-                    sessionId,
-                    $"IP сменился: {ipChangeState.OldIp} → {ipChangeState.NewIp} — перезапуск сессии",
-                    CancellationToken.None);
+                if (sessionProxyHostKey is not null)
+                {
+                    await ReportLogAsync(
+                        sessionId,
+                        $"IP сменился: {ipChangeState.OldIp} → {ipChangeState.NewIp} — перезапуск сессии (остальные сессии на том же прокси получат сигнал)",
+                        CancellationToken.None);
+                }
+                else
+                {
+                    await ReportLogAsync(
+                        sessionId,
+                        $"IP сменился: {ipChangeState.OldIp} → {ipChangeState.NewIp} — перезапуск сессии",
+                        CancellationToken.None);
+                }
+
                 return SessionRunResult.RestartAfterIpChange(
                     playGameOverCount,
                     ipChangeState.OldIp,
@@ -514,6 +576,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
             if (IsBrowserClosedException(ex))
             {
                 await ReportLogAsync(sessionId, "Браузер закрыт — сессия будет перезапущена", CancellationToken.None);
+                await ReportLogAsync(sessionId, "Перезапуск…", CancellationToken.None);
                 return SessionRunResult.BrowserClosed(playGameOverCount);
             }
 
@@ -526,10 +589,12 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
             }
 
             await ReportLogAsync(sessionId, $"Ошибка: {ex.Message} — будет перезапуск", CancellationToken.None);
+            await ReportLogAsync(sessionId, "Перезапуск…", CancellationToken.None);
             return SessionRunResult.BrowserClosed(playGameOverCount);
         }
         finally
         {
+            proxyIpRegistration?.Dispose();
             _remoteInput.Clear(profile.Id);
             ipChangeCts.Cancel();
             ipChangeCts.Dispose();

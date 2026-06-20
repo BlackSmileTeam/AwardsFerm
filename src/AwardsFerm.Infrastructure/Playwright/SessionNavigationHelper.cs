@@ -31,6 +31,7 @@ internal static class SessionNavigationHelper
             try
             {
                 await GotoResilientAsync(page, url, timeoutMs);
+                EnsureNavigationSucceeded(page, url);
                 if (onProgress is not null)
                     await onProgress($"Страница загружена: {page.Url}");
                 return;
@@ -110,6 +111,42 @@ internal static class SessionNavigationHelper
         return false;
     }
 
+    public static bool IsBrowserErrorPage(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return true;
+
+        return url.StartsWith("chrome-error://", StringComparison.OrdinalIgnoreCase) ||
+               url.Contains("chromewebdata", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void EnsureNavigationSucceeded(IPage page, string targetUrl)
+    {
+        var current = page.Url;
+        if (IsBrowserErrorPage(current))
+        {
+            throw new PlaywrightException(
+                $"net::ERR_FAILED at {targetUrl} (страница ошибки браузера: {current})");
+        }
+
+        if (!Uri.TryCreate(targetUrl, UriKind.Absolute, out var expected))
+            return;
+
+        var expectedHost = expected.Host;
+        if (current.Contains(expectedHost, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (expectedHost.Contains("yandex.", StringComparison.OrdinalIgnoreCase) &&
+            (current.Contains("yandex.", StringComparison.OrdinalIgnoreCase) ||
+             current.Contains("dzen.", StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        throw new PlaywrightException(
+            $"net::ERR_FAILED at {targetUrl} (открыта другая страница: {current})");
+    }
+
     public static bool IsProxyNetworkError(Exception ex)
     {
         for (var current = ex; current is not null; current = current.InnerException)
@@ -131,8 +168,24 @@ internal static class SessionNavigationHelper
         return false;
     }
 
-    private static bool IsRetryableNavigationError(Exception ex) =>
-        IsProxyNetworkError(ex) ||
-        ex.Message.Contains("Timeout", StringComparison.OrdinalIgnoreCase) ||
-        ex.Message.Contains("net::ERR_", StringComparison.OrdinalIgnoreCase);
+    private static bool IsRetryableNavigationError(Exception ex)
+    {
+        if (IsProxyNetworkError(ex))
+            return true;
+
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            var msg = current.Message;
+            if (msg.Contains("Timeout", StringComparison.OrdinalIgnoreCase) ||
+                msg.Contains("net::ERR_", StringComparison.OrdinalIgnoreCase) ||
+                msg.Contains("Execution context was destroyed", StringComparison.OrdinalIgnoreCase) ||
+                msg.Contains("страница ошибки браузера", StringComparison.OrdinalIgnoreCase) ||
+                msg.Contains("открыта другая страница", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

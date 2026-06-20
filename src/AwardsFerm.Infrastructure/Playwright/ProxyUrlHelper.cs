@@ -70,6 +70,22 @@ internal static class ProxyUrlHelper
         }
     }
 
+    public static string? ExtractHostKey(string? proxyUrl)
+    {
+        if (string.IsNullOrWhiteSpace(proxyUrl))
+            return null;
+
+        try
+        {
+            var uri = new Uri(proxyUrl);
+            return $"{uri.Host}:{uri.Port}";
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public static bool TryParseProxy(string? proxyUrl, out ProxyCredentials credentials)
     {
         credentials = default!;
@@ -116,7 +132,7 @@ internal static class ProxyUrlHelper
                 if (host.Contains(PoolMarketHost, StringComparison.OrdinalIgnoreCase))
                     return "Проверьте баланс и пул в ЛК Proxy.Market; порты 10000+ на слот, логин/пароль без изменений.";
                 if (host.Equals("tproxy.pro", StringComparison.OrdinalIgnoreCase))
-                    return "Проверьте срок действия и логин/пароль в ЛК ProxyCola; IP меняется кнопкой «Сменить IP» или по таймеру.";
+                    return "ProxyCola: IP-check прошёл, но сайт недоступен — смените IP в ЛК или дождитесь ротации (~20 мин).";
             }
         }
         catch

@@ -12,8 +12,24 @@ public sealed class BrowserLaunchResult : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        try { await Page.CloseAsync(); } catch { /* ignore */ }
-        try { await Context.CloseAsync(); } catch { /* ignore */ }
+        try
+        {
+            await Page.CloseAsync().WaitAsync(TimeSpan.FromSeconds(4));
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
+            await Context.CloseAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        catch
+        {
+            // ignore — не блокируем перезапуск сессии
+        }
+
         Playwright.Dispose();
     }
 }
