@@ -45,6 +45,9 @@ public sealed class UserProfitService
             {
                 var token = _tokenEncryption.Decrypt(account.TokenEncrypted);
                 var dashboard = await _rsya.GetDashboardForTokenAsync(token, ct);
+                if (!string.IsNullOrWhiteSpace(dashboard.Error))
+                    throw new InvalidOperationException(dashboard.Error);
+
                 todayReward = dashboard.Today.Reward;
                 yesterdayReward = dashboard.Yesterday.Reward;
                 weekReward = dashboard.ThisWeek.Reward;

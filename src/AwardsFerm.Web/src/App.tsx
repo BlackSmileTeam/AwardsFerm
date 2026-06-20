@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { checkApiHealth, resetHubConnection } from './api'
+import { useState } from 'react'
+import { resetHubConnection } from './api'
 import { clearAuth, getLogin, isAuthenticated } from './auth'
 import { AdAccountsPanel } from './components/AdAccountsPanel'
 import { LoginPage } from './components/LoginPage'
@@ -30,15 +30,6 @@ function App() {
   const [userLogin, setUserLogin] = useState(getLogin() ?? '')
   const [tab, setTab] = useState<Tab>('sessions')
   const [proxyPrefillName, setProxyPrefillName] = useState<string | null>(null)
-  const [apiUp, setApiUp] = useState(false)
-
-  useEffect(() => {
-    if (!authed) return
-    const check = async () => setApiUp(await checkApiHealth())
-    void check()
-    const interval = window.setInterval(() => void check(), 10000)
-    return () => window.clearInterval(interval)
-  }, [authed])
 
   const onLogout = () => {
     clearAuth()
@@ -73,11 +64,6 @@ function App() {
             >
               <ProfileIcon />
             </button>
-          </div>
-          <div className="header-meta">
-            <span className={`badge ${apiUp ? 'badge-ok' : 'badge-warn'}`}>
-              API {apiUp ? 'доступен' : 'недоступен'}
-            </span>
           </div>
         </div>
         <p className="subtitle">
@@ -127,7 +113,7 @@ function App() {
       {tab === 'profile' && <ProfilePanel login={userLogin} onLogout={onLogout} />}
 
       <footer className="footer">
-        <span>SQLite · headless · логи в реальном времени (SignalR)</span>
+        <span>SQLite · логи в реальном времени</span>
       </footer>
     </div>
   )

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   addSlot,
   ApiError,
+  checkApiHealth,
   createSessionHub,
   deleteSlot,
   ensureHubConnected,
@@ -9,6 +10,7 @@ import {
   fetchProxies,
   fetchSessions,
   fetchSlots,
+  isHubConnected,
   pauseSessionByProfile,
   resumeSessionByProfile,
   startSession,
@@ -25,6 +27,7 @@ import {
   type SlotState,
 } from '../types'
 import { normalizeStatus, statusCssClass } from '../utils/session'
+import { ServicesIndicator } from './ServicesIndicator'
 
 const statusLabels: Record<SessionStatus, string> = {
   Idle: 'Ожидание',
@@ -48,8 +51,9 @@ export function SessionsPanel() {
     confirmText: string
     cancelText: string
   } | null>(null)
-  const [connected, setConnected] = useState(false)
   const [addingSlot, setAddingSlot] = useState(false)
+  const [apiUp, setApiUp] = useState(false)
+  const [signalRUp, setSignalRUp] = useState(false)
   const [proxies, setProxies] = useState<ProxyConfig[]>([])
 
   const sessionIdToProfile = useRef<Record<string, string>>({})
@@ -253,8 +257,11 @@ export function SessionsPanel() {
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) throw e
       }
-      const hubOk = await ensureHubConnected()
-      setConnected(hubOk)
+      const apiOk = await checkApiHealth()
+      setApiUp(apiOk)
+      if (apiOk)
+        await ensureHubConnected()
+      setSignalRUp(isHubConnected())
     }
 
     void sync()
@@ -459,12 +466,10 @@ export function SessionsPanel() {
   return (
     <>
       <div className="sessions-toolbar-meta">
-        <span className={`badge ${connected ? 'badge-ok' : 'badge-warn'}`}>
-          SignalR {connected ? 'подключён' : 'отключён'}
-        </span>
         <span className="badge">
           Активно: {activeCount}/{slotConfigs.length}
         </span>
+        <ServicesIndicator apiUp={apiUp} signalRUp={signalRUp} />
       </div>
 
       <div className="account-selector">

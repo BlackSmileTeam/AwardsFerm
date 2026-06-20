@@ -318,6 +318,10 @@ export function createSessionHub(onEvent: (event: SessionEvent) => void): signal
   return hub
 }
 
+export function isHubConnected(): boolean {
+  return hubConnection?.state === signalR.HubConnectionState.Connected
+}
+
 export async function ensureHubConnected(): Promise<boolean> {
   const apiUp = await checkApiHealth()
   if (!apiUp) return false
