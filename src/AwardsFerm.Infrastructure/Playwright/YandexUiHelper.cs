@@ -451,6 +451,9 @@ internal static class YandexUiHelper
         if (await SessionNavigationHelper.IsPageUnavailableAsync(page))
             return true;
 
+        if (await SessionNavigationHelper.IsCdnGameFrameBrokenAsync(page))
+            return true;
+
         var errorTexts =
             new[]
             {
@@ -462,7 +465,10 @@ internal static class YandexUiHelper
                 "loading error",
                 "something went wrong",
                 "try again",
-                "повторить"
+                "повторить",
+                "временно недоступ",
+                "перемещена по новому",
+                "веб-страница по адресу"
             };
 
         try
@@ -502,16 +508,34 @@ internal static class YandexUiHelper
         if (page.IsClosed)
             return false;
 
-        var unavailable = await SessionNavigationHelper.IsPageUnavailableAsync(page);
-        var loadError = !unavailable && await IsGameLoadErrorVisibleAsync(page);
-        if (!unavailable && !loadError)
+        if (!await IsGameLoadErrorVisibleAsync(page))
             return false;
 
-        if (stuckTracker is not null && stuckTracker.Register("page_reload", maxRepeats: 5))
+        var cdnSrc = await SessionNavigationHelper.GetCdnGameIframeSrcAsync(page);
+        if (cdnSrc is not null &&
+            (stuckTracker is null || !stuckTracker.Register("cdn_reload", maxRepeats: 6)))
+        {
+            await reporter.ReportAsync(new SessionEvent
+            {
+                SessionId = sessionId,
+                Type = SessionEventType.Log,
+                Message = "CDN игры недоступен — перезагружаем iframe…"
+            }, cancellationToken);
+
+            if (await SessionNavigationHelper.TryReloadCdnGameFrameAsync(page, cancellationToken))
+            {
+                await HumanBehavior.DelayAsync(2000, 3500, cancellationToken);
+                await DismissPopupsAsync(page, cancellationToken);
+                if (!await IsGameLoadErrorVisibleAsync(page))
+                    return true;
+            }
+        }
+
+        if (stuckTracker is not null && stuckTracker.Register("page_reload", maxRepeats: 6))
             return false;
 
-        var message = unavailable
-            ? "Страница недоступна — обновляем…"
+        var message = cdnSrc is not null
+            ? "CDN игры не восстановился — обновляем страницу…"
             : "Ошибка загрузки — обновляем страницу…";
 
         await reporter.ReportAsync(new SessionEvent
@@ -523,12 +547,10 @@ internal static class YandexUiHelper
 
         try
         {
-            await page.ReloadAsync(new PageReloadOptions
-            {
-                WaitUntil = WaitUntilState.Commit,
-                Timeout = 30_000
-            });
+            await SessionNavigationHelper.ReloadResilientAsync(page);
             await HumanBehavior.DelayAsync(2000, 3500, cancellationToken);
+            await DismissPopupsAsync(page, cancellationToken);
+            await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, reporter, cancellationToken);
             return true;
         }
         catch

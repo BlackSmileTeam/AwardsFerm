@@ -470,33 +470,57 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                     landscapeState: landscapeState,
                     stuckTracker: stuckTracker);
 
+                for (var recoverAttempt = 0; recoverAttempt < 4; recoverAttempt++)
+                {
+                    if (await YandexUiHelper.IsGameRunningAsync(gamePage) &&
+                        !await YandexUiHelper.IsGameLoadErrorVisibleAsync(gamePage))
+                    {
+                        break;
+                    }
+
+                    if (!await YandexUiHelper.TryRecoverLoadFailureAsync(
+                            gamePage, sessionId, _eventReporter, stuckTracker, sessionCt))
+                    {
+                        break;
+                    }
+
+                    await YandexUiHelper.DismissPopupsAsync(gamePage, sessionCt);
+                    await CaptchaHelper.WaitForManualSolveAsync(gamePage, sessionId, _eventReporter, sessionCt);
+
+                    gamePage = await YandexUiHelper.EnterGameAsync(
+                        context,
+                        gamePage,
+                        options.TargetGameUrl,
+                        options.TargetGameUrlPart,
+                        sessionId,
+                        _eventReporter,
+                        sessionCt,
+                        sessionProfile,
+                        landscapeState,
+                        stuckTracker);
+
+                    activePage!.Page = gamePage;
+
+                    await YandexUiHelper.WaitForGameFullyLoadedAsync(
+                        gamePage,
+                        sessionCt,
+                        context: context,
+                        profile: sessionProfile,
+                        sessionId: sessionId,
+                        reporter: _eventReporter,
+                        landscapeState: landscapeState,
+                        stuckTracker: stuckTracker);
+                }
+
                 if (await YandexUiHelper.IsGameLoadErrorVisibleAsync(gamePage) ||
                     !await YandexUiHelper.IsGameRunningAsync(gamePage))
                 {
-                    if (await YandexUiHelper.TryRecoverLoadFailureAsync(
-                            gamePage, sessionId, _eventReporter, stuckTracker, sessionCt))
-                    {
-                        await YandexUiHelper.WaitForGameFullyLoadedAsync(
-                            gamePage,
-                            sessionCt,
-                            context: context,
-                            profile: sessionProfile,
-                            sessionId: sessionId,
-                            reporter: _eventReporter,
-                            landscapeState: landscapeState,
-                            stuckTracker: stuckTracker);
-                    }
-
-                    if (await YandexUiHelper.IsGameLoadErrorVisibleAsync(gamePage) ||
-                        !await YandexUiHelper.IsGameRunningAsync(gamePage))
-                    {
-                        await SessionScreenDiagnostic.TriggerRestartAsync(
-                            sessionId,
-                            gamePage,
-                            "Игра не запустилась — на экране нет игрового canvas",
-                            _eventReporter,
-                            sessionCt);
-                    }
+                    await SessionScreenDiagnostic.TriggerRestartAsync(
+                        sessionId,
+                        gamePage,
+                        "Игра не запустилась — на экране нет игрового canvas",
+                        _eventReporter,
+                        sessionCt);
                 }
 
                 await ReportLogAsync(sessionId, "✓ Игра загружена (экран «Загрузка» завершён)", sessionCt);

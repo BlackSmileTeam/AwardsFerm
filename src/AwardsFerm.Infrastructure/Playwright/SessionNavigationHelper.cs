@@ -126,18 +126,83 @@ internal static class SessionNavigationHelper
                url.Contains("chromewebdata", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static readonly string[] UnavailableMessageSnippets =
+    [
+        "временно недоступ",
+        "перемещена по новому",
+        "веб-страница по адресу",
+        "возможно, временно",
+        "не удается получить доступ",
+        "не удаётся получить доступ",
+        "can't be reached",
+        "this site can't be reached",
+        "temporarily unavailable",
+        "moved permanently",
+        "err_connection",
+        "err_timed_out",
+        "err_failed"
+    ];
+
+    public static bool IsCdnGameUrl(string? url) =>
+        !string.IsNullOrWhiteSpace(url) &&
+        url.Contains("cdn.games.yandex.net", StringComparison.OrdinalIgnoreCase);
+
     public static bool IsPageUnavailableText(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))
             return false;
 
         var lower = text.ToLowerInvariant();
-        return lower.Contains("временно недоступ", StringComparison.Ordinal) ||
-               lower.Contains("перемещена по новому", StringComparison.Ordinal) ||
-               lower.Contains("перемещён", StringComparison.Ordinal) ||
-               lower.Contains("перемещен", StringComparison.Ordinal) ||
-               lower.Contains("temporarily unavailable", StringComparison.Ordinal) ||
-               lower.Contains("moved permanently", StringComparison.Ordinal);
+        foreach (var snippet in UnavailableMessageSnippets)
+        {
+            if (lower.Contains(snippet, StringComparison.Ordinal))
+                return true;
+        }
+
+        return lower.Contains("перемещён", StringComparison.Ordinal) ||
+               lower.Contains("перемещен", StringComparison.Ordinal);
+    }
+
+    public static async Task<bool> HasUnavailableMessageVisibleAsync(IPage page)
+    {
+        if (page.IsClosed)
+            return false;
+
+        foreach (var snippet in UnavailableMessageSnippets)
+        {
+            try
+            {
+                var locator = page.GetByText(snippet, new PageGetByTextOptions { Exact = false });
+                if (await locator.CountAsync() > 0 && await locator.First.IsVisibleAsync())
+                    return true;
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        foreach (var frame in page.Frames)
+        {
+            if (frame == page.MainFrame)
+                continue;
+
+            foreach (var snippet in UnavailableMessageSnippets)
+            {
+                try
+                {
+                    var locator = frame.GetByText(snippet, new FrameGetByTextOptions { Exact = false });
+                    if (await locator.CountAsync() > 0 && await locator.First.IsVisibleAsync())
+                        return true;
+                }
+                catch
+                {
+                    // cross-origin or detached
+                }
+            }
+        }
+
+        return false;
     }
 
     public static async Task<bool> IsPageUnavailableAsync(IPage page)
@@ -146,6 +211,9 @@ internal static class SessionNavigationHelper
             return false;
 
         if (IsBrowserErrorPage(page.Url))
+            return true;
+
+        if (await HasUnavailableMessageVisibleAsync(page))
             return true;
 
         try
@@ -179,6 +247,137 @@ internal static class SessionNavigationHelper
         return false;
     }
 
+    public static async Task<string?> GetCdnGameIframeSrcAsync(IPage page)
+    {
+        if (page.IsClosed)
+            return null;
+
+        try
+        {
+            return await page.EvaluateAsync<string?>(
+                """
+                () => {
+                    for (const el of document.querySelectorAll('iframe[src]')) {
+                        const s = (el.src || el.getAttribute('src') || '').toLowerCase();
+                        if (s.includes('cdn.games.yandex.net'))
+                            return el.src || el.getAttribute('src');
+                    }
+                    return null;
+                }
+                """);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static async Task<bool> IsCdnGameFrameBrokenAsync(IPage page)
+    {
+        if (page.IsClosed)
+            return false;
+
+        var src = await GetCdnGameIframeSrcAsync(page);
+        if (string.IsNullOrWhiteSpace(src))
+            return false;
+
+        var hasHealthyCdnFrame = false;
+        foreach (var frame in page.Frames)
+        {
+            if (frame == page.MainFrame)
+                continue;
+
+            if (IsBrowserErrorPage(frame.Url))
+                return true;
+
+            if (IsCdnGameUrl(frame.Url))
+                hasHealthyCdnFrame = true;
+        }
+
+        // iframe в DOM есть, но фрейм CDN не поднялся — типичный сбой CDN.
+        return !hasHealthyCdnFrame;
+    }
+
+    public static async Task ReloadResilientAsync(IPage page, int timeoutMs = 45_000)
+    {
+        await page.ReloadAsync(new PageReloadOptions
+        {
+            WaitUntil = WaitUntilState.Commit,
+            Timeout = timeoutMs
+        });
+
+        try
+        {
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded, new PageWaitForLoadStateOptions
+            {
+                Timeout = Math.Min(20_000, timeoutMs / 2)
+            });
+        }
+        catch (TimeoutException)
+        {
+            // Тяжёлые страницы игр часто не отдают DOMContentLoaded вовремя.
+        }
+    }
+
+    public static async Task<bool> TryReloadCdnGameFrameAsync(
+        IPage page,
+        CancellationToken cancellationToken = default)
+    {
+        if (page.IsClosed)
+            return false;
+
+        var src = await GetCdnGameIframeSrcAsync(page);
+        if (string.IsNullOrWhiteSpace(src))
+            return false;
+
+        IFrame? target = null;
+        foreach (var frame in page.Frames)
+        {
+            if (frame == page.MainFrame)
+                continue;
+
+            if (IsCdnGameUrl(frame.Url) || IsBrowserErrorPage(frame.Url))
+            {
+                target = frame;
+                break;
+            }
+        }
+
+        try
+        {
+            if (target is not null)
+            {
+                await target.GotoAsync(src, new FrameGotoOptions
+                {
+                    WaitUntil = WaitUntilState.DOMContentLoaded,
+                    Timeout = 45_000
+                });
+            }
+            else
+            {
+                var reset = await page.EvaluateAsync<bool>(
+                    """
+                    (url) => {
+                        const iframe = document.querySelector('iframe[src*="cdn.games.yandex.net"]');
+                        if (!iframe) return false;
+                        iframe.src = url;
+                        return true;
+                    }
+                    """,
+                    src);
+                if (!reset)
+                    return false;
+            }
+
+            await HumanBehavior.DelayAsync(2500, 4500, cancellationToken);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static async Task<bool> TryReloadIfUnavailableAsync(
         IPage page,
         CancellationToken cancellationToken = default,
@@ -187,16 +386,24 @@ internal static class SessionNavigationHelper
         if (page.IsClosed || !await IsPageUnavailableAsync(page))
             return false;
 
+        if (await GetCdnGameIframeSrcAsync(page) is not null)
+        {
+            if (onProgress is not null)
+                await onProgress("CDN игры недоступен — перезагружаем iframe…");
+
+            if (await TryReloadCdnGameFrameAsync(page, cancellationToken) &&
+                !await IsPageUnavailableAsync(page))
+            {
+                return true;
+            }
+        }
+
         if (onProgress is not null)
             await onProgress("Страница недоступна — обновляем…");
 
         try
         {
-            await page.ReloadAsync(new PageReloadOptions
-            {
-                WaitUntil = WaitUntilState.Commit,
-                Timeout = 30_000
-            });
+            await ReloadResilientAsync(page);
             await HumanBehavior.DelayAsync(1500, 2500, cancellationToken);
             return true;
         }
