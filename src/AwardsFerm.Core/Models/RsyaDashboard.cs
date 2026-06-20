@@ -8,6 +8,7 @@ public sealed class RsyaDashboard
     public string? ReportTitle { get; init; }
     public RsyaPeriodStats Today { get; init; } = new();
     public RsyaPeriodStats Yesterday { get; init; } = new();
+    public RsyaPeriodStats ThisWeek { get; init; } = new();
     public RsyaPeriodStats ThisMonth { get; init; } = new();
     public IReadOnlyList<RsyaDailyPoint> DailyChart { get; init; } = [];
     public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;

@@ -7,6 +7,8 @@ public sealed class AdAccountDto
     public string GameTitle { get; set; } = string.Empty;
     public string GameUrl { get; set; } = string.Empty;
     public decimal TodayReward { get; set; }
+    public decimal YesterdayReward { get; set; }
+    public decimal WeekReward { get; set; }
     public decimal MonthReward { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
@@ -30,6 +32,8 @@ public sealed class UpdateAdAccountRequest
 public sealed class UserProfitSummaryDto
 {
     public decimal TotalTodayReward { get; set; }
+    public decimal TotalYesterdayReward { get; set; }
+    public decimal TotalWeekReward { get; set; }
     public decimal TotalMonthReward { get; set; }
     public IReadOnlyList<AdAccountDto> Accounts { get; set; } = [];
 }

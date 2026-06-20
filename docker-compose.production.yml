@@ -17,6 +17,7 @@ services:
     volumes:
       - ./profiles:/app/profiles
     shm_size: "2gb"
+    ipc: host
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 10s

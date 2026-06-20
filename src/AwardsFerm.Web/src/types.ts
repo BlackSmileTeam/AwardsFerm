@@ -75,6 +75,8 @@ export interface AdAccount {
   gameTitle: string
   gameUrl: string
   todayReward?: number
+  yesterdayReward?: number
+  weekReward?: number
   monthReward?: number
   createdAt: string
 }
@@ -95,6 +97,8 @@ export interface UpdateAdAccountRequest {
 
 export interface UserProfitSummary {
   totalTodayReward: number
+  totalYesterdayReward: number
+  totalWeekReward: number
   totalMonthReward: number
   accounts: AdAccount[]
 }

@@ -249,6 +249,14 @@ internal static class CaptchaHelper
         if (string.IsNullOrEmpty(envHeadless))
             return true;
 
-        return bool.TryParse(envHeadless, out var headless) && headless;
+        if (!bool.TryParse(envHeadless, out var headless) || !headless)
+            return false;
+
+        if (Environment.GetEnvironmentVariable("BROWSER_VNC") == "true")
+            return false;
+        if (OperatingSystem.IsLinux() && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DISPLAY")))
+            return false;
+
+        return true;
     }
 }

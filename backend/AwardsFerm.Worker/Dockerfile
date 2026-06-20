@@ -24,5 +24,6 @@ ENV BROWSER_VNC=false
 ENV BROWSER_VNC_PASSWORD=
 ENV DISPLAY=:99
 EXPOSE 8081
-# Headless по умолчанию (Linux VPS). BROWSER_HEADLESS=false — запуск Xvfb для headed.
-ENTRYPOINT ["sh", "-c", "if [ \"$BROWSER_HEADLESS\" = \"false\" ]; then Xvfb :99 -screen 0 1920x1080x24 -ac +extension RANDR & if [ \"$BROWSER_VNC\" = \"true\" ]; then if [ -n \"$BROWSER_VNC_PASSWORD\" ]; then x11vnc -display :99 -forever -shared -passwd \"$BROWSER_VNC_PASSWORD\" -listen 0.0.0.0 -rfbport 5900 & else x11vnc -display :99 -forever -shared -nopw -listen 0.0.0.0 -rfbport 5900 & fi; fi; fi; exec dotnet AwardsFerm.Worker.dll"]
+# Xvfb всегда: полный Chromium на :99 стабильнее headless_shell в Docker.
+# BROWSER_HEADLESS=false + BROWSER_VNC=true — VNC для ручного просмотра/капчи.
+ENTRYPOINT ["sh", "-c", "Xvfb :99 -screen 0 1920x1080x24 -ac +extension RANDR & sleep 1; if [ \"$BROWSER_VNC\" = \"true\" ]; then if [ -n \"$BROWSER_VNC_PASSWORD\" ]; then x11vnc -display :99 -forever -shared -passwd \"$BROWSER_VNC_PASSWORD\" -listen 0.0.0.0 -rfbport 5900 & else x11vnc -display :99 -forever -shared -nopw -listen 0.0.0.0 -rfbport 5900 & fi; fi; exec dotnet AwardsFerm.Worker.dll"]

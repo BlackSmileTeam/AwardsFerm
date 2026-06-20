@@ -10,22 +10,57 @@
 
 .header {
   display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.header-top {
+  display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  gap: 1rem;
+  align-items: center;
+  gap: 0.75rem;
   flex-wrap: wrap;
+  width: 100%;
+}
+
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
 }
 
 .header h1 {
   font-size: 1.75rem;
   font-weight: 700;
   color: #fff;
+  margin: 0;
+}
+
+.header-profile-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 999px;
+  border: 1px solid #2d3348;
+  background: #161b26;
+  color: #9aa0a6;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.header-profile-btn-active {
+  border-color: #1a73e8;
+  background: #0d1a2e;
+  color: #8ab4f8;
 }
 
 .subtitle {
   color: #9aa0a6;
   font-size: 0.95rem;
-  margin-top: 0.25rem;
+  margin: 0;
 }
 
 .header-meta {
@@ -553,14 +588,26 @@
   gap: 0.65rem;
 }
 
+.rsya-cards-profit {
+  grid-template-columns: repeat(4, 1fr);
+}
+
 @media (max-width: 1100px) {
   .rsya-cards {
     grid-template-columns: repeat(3, 1fr);
+  }
+
+  .rsya-cards-profit {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
 @media (max-width: 600px) {
   .rsya-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .rsya-cards-profit {
     grid-template-columns: repeat(2, 1fr);
   }
 }
@@ -800,6 +847,32 @@
   background: #1a73e8;
   border-color: #1a73e8;
   color: #fff;
+}
+
+.profile-logout {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid #2d3348;
+}
+
+@media (max-width: 600px) {
+  .header-profile-btn {
+    display: inline-flex;
+  }
+
+  .tab-btn-profile-desktop {
+    display: none;
+  }
+
+  .app-tabs {
+    flex-wrap: wrap;
+  }
+}
+
+@media (min-width: 601px) {
+  .header-profile-btn {
+    display: none;
+  }
 }
 
 .account-selector {

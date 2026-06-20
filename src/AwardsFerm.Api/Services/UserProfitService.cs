@@ -30,11 +30,15 @@ public sealed class UserProfitService
 
         var result = new List<AdAccountDto>(accounts.Count);
         decimal totalToday = 0;
+        decimal totalYesterday = 0;
+        decimal totalWeek = 0;
         decimal totalMonth = 0;
 
         foreach (var account in accounts)
         {
             decimal todayReward = 0;
+            decimal yesterdayReward = 0;
+            decimal weekReward = 0;
             decimal monthReward = 0;
 
             try
@@ -42,6 +46,8 @@ public sealed class UserProfitService
                 var token = _tokenEncryption.Decrypt(account.TokenEncrypted);
                 var dashboard = await _rsya.GetDashboardForTokenAsync(token, ct);
                 todayReward = dashboard.Today.Reward;
+                yesterdayReward = dashboard.Yesterday.Reward;
+                weekReward = dashboard.ThisWeek.Reward;
                 monthReward = dashboard.ThisMonth.Reward;
 
                 _db.RsyaSnapshots.Add(new Data.Entities.RsyaSnapshotEntity
@@ -59,6 +65,8 @@ public sealed class UserProfitService
             }
 
             totalToday += todayReward;
+            totalYesterday += yesterdayReward;
+            totalWeek += weekReward;
             totalMonth += monthReward;
             result.Add(new AdAccountDto
             {
@@ -67,6 +75,8 @@ public sealed class UserProfitService
                 GameTitle = account.GameTitle,
                 GameUrl = account.GameUrl,
                 TodayReward = todayReward,
+                YesterdayReward = yesterdayReward,
+                WeekReward = weekReward,
                 MonthReward = monthReward,
                 CreatedAt = account.CreatedAt
             });
@@ -77,6 +87,8 @@ public sealed class UserProfitService
         return new UserProfitSummaryDto
         {
             TotalTodayReward = totalToday,
+            TotalYesterdayReward = totalYesterday,
+            TotalWeekReward = totalWeek,
             TotalMonthReward = totalMonth,
             Accounts = result
         };

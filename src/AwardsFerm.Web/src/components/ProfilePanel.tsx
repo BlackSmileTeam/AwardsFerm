@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { changePassword } from '../api'
 
-export function ProfilePanel({ login }: { login: string }) {
+export function ProfilePanel({ login, onLogout }: { login: string; onLogout: () => void }) {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [repeatPassword, setRepeatPassword] = useState('')
@@ -87,6 +87,12 @@ export function ProfilePanel({ login }: { login: string }) {
           </button>
         </div>
       </form>
+
+      <div className="profile-logout">
+        <button className="btn btn-secondary btn-sm" type="button" onClick={onLogout}>
+          Выйти из аккаунта
+        </button>
+      </div>
     </section>
   )
 }

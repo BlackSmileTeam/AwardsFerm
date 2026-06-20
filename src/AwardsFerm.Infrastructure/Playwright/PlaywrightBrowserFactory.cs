@@ -37,9 +37,12 @@ public sealed class PlaywrightBrowserFactory
         var isMobileLike = profile.FormFactor != DeviceFormFactor.Desktop;
         var viewport = new ViewportSize { Width = profile.ViewportWidth, Height = profile.ViewportHeight };
 
+        var isLinux = OperatingSystem.IsLinux();
+        var headless = ResolveHeadlessForLaunch(options.Headless, isLinux);
+
         var launchOptions = new BrowserTypeLaunchPersistentContextOptions
         {
-            Headless = options.Headless,
+            Headless = headless,
             UserAgent = profile.UserAgent,
             ViewportSize = viewport,
             Locale = profile.Locale,
@@ -56,7 +59,8 @@ public sealed class PlaywrightBrowserFactory
             IsMobile = false,
             HasTouch = isMobileLike,
             SlowMo = 50,
-            Args = BuildChromeArgs(profile, windowPosition),
+            Args = BuildChromeArgs(profile, windowPosition, isLinux),
+            Timeout = 120_000,
             ExtraHTTPHeaders = new Dictionary<string, string>
             {
                 ["Accept-Language"] = BuildAcceptLanguage(profile.Locale)
@@ -90,7 +94,6 @@ public sealed class PlaywrightBrowserFactory
         }
 
         IBrowserContext context;
-        var isLinux = OperatingSystem.IsLinux();
         if (!isLinux)
         {
             try
@@ -123,34 +126,47 @@ public sealed class PlaywrightBrowserFactory
         };
     }
 
-    private static string[] BuildChromeArgs(DesktopProfile profile, (int X, int Y) windowPosition)
+    /// <summary>
+    /// headless_shell в Docker часто зависает на GPU/X11; при DISPLAY используем полный Chromium на Xvfb.
+    /// </summary>
+    private static bool ResolveHeadlessForLaunch(bool requestedHeadless, bool isLinux)
     {
+        if (!isLinux || !requestedHeadless)
+            return requestedHeadless;
+
+        var display = Environment.GetEnvironmentVariable("DISPLAY");
+        return string.IsNullOrWhiteSpace(display);
+    }
+
+    private static string[] BuildChromeArgs(DesktopProfile profile, (int X, int Y) windowPosition, bool isLinux)
+    {
+        var common = new List<string>
+        {
+            "--disable-blink-features=AutomationControlled",
+            "--disable-infobars",
+            $"--lang={profile.Locale}",
+            "--no-first-run",
+            "--no-default-browser-check"
+        };
+
+        if (isLinux)
+        {
+            common.Add("--disable-gpu");
+            common.Add("--disable-software-rasterizer");
+        }
+
         if (profile.FormFactor == DeviceFormFactor.Desktop)
         {
-            return
-            [
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-                $"--window-size={profile.ViewportWidth},{profile.ViewportHeight}",
-                $"--window-position={windowPosition.X},{windowPosition.Y}",
-                $"--lang={profile.Locale}",
-                "--no-first-run",
-                "--no-default-browser-check"
-            ];
+            common.Add($"--window-size={profile.ViewportWidth},{profile.ViewportHeight}");
+            common.Add($"--window-position={windowPosition.X},{windowPosition.Y}");
+            return common.ToArray();
         }
 
         var chromeChrome = profile.FormFactor == DeviceFormFactor.Phone ? 110 : 90;
-        return
-        [
-            "--disable-blink-features=AutomationControlled",
-            "--disable-infobars",
-            $"--window-size={profile.ViewportWidth},{profile.ViewportHeight + chromeChrome}",
-            $"--window-position={windowPosition.X},{windowPosition.Y}",
-            $"--lang={profile.Locale}",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--disable-features=TranslateUI"
-        ];
+        common.Add($"--window-size={profile.ViewportWidth},{profile.ViewportHeight + chromeChrome}");
+        common.Add($"--window-position={windowPosition.X},{windowPosition.Y}");
+        common.Add("--disable-features=TranslateUI");
+        return common.ToArray();
     }
 
     private static async Task StabilizeViewportAsync(IBrowserContext context, IPage page, DesktopProfile profile)

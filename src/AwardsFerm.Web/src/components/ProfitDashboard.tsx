@@ -60,9 +60,11 @@ export function ProfitDashboard() {
 
       {error && <div className="rsya-error">{error}</div>}
 
-      <div className="rsya-cards">
-        <StatCard label="Сегодня (всего)" value={formatMoney(data?.totalTodayReward ?? 0)} accent />
-        <StatCard label="За месяц (всего)" value={formatMoney(data?.totalMonthReward ?? 0)} />
+      <div className="rsya-cards rsya-cards-profit">
+        <StatCard label="Сегодня" value={formatMoney(data?.totalTodayReward ?? 0)} accent />
+        <StatCard label="Вчера" value={formatMoney(data?.totalYesterdayReward ?? 0)} />
+        <StatCard label="Неделя" value={formatMoney(data?.totalWeekReward ?? 0)} />
+        <StatCard label="Месяц" value={formatMoney(data?.totalMonthReward ?? 0)} />
       </div>
 
       {(data?.accounts.length ?? 0) > 0 && (
@@ -73,6 +75,8 @@ export function ProfitDashboard() {
                 <th>Аккаунт</th>
                 <th>Игра</th>
                 <th>Сегодня</th>
+                <th>Вчера</th>
+                <th>Неделя</th>
                 <th>Месяц</th>
               </tr>
             </thead>
@@ -82,6 +86,8 @@ export function ProfitDashboard() {
                   <td>{account.name}</td>
                   <td className="profit-game">{account.gameTitle}</td>
                   <td>{formatMoney(account.todayReward ?? 0)}</td>
+                  <td>{formatMoney(account.yesterdayReward ?? 0)}</td>
+                  <td>{formatMoney(account.weekReward ?? 0)}</td>
                   <td>{formatMoney(account.monthReward ?? 0)}</td>
                 </tr>
               ))}

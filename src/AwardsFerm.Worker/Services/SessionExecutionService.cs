@@ -160,9 +160,11 @@ public sealed class SessionExecutionService
                     options.Headless = ResolveHeadless(options);
 
                     _logger.LogInformation(
-                        "Profile {ProfileId}: запуск браузера (session {SessionId})",
+                        "Profile {ProfileId}: запуск браузера (session {SessionId}, headless={Headless}, display={Display})",
                         execution.ProfileId,
-                        execution.SessionId);
+                        execution.SessionId,
+                        options.Headless,
+                        Environment.GetEnvironmentVariable("DISPLAY") ?? "(none)");
 
                     var result = await _runner.RunYandexGamesSearchAsync(
                         execution.SessionId,
@@ -218,9 +220,18 @@ public sealed class SessionExecutionService
     {
         var envHeadless = Environment.GetEnvironmentVariable("BROWSER_HEADLESS");
         if (!string.IsNullOrEmpty(envHeadless) && bool.TryParse(envHeadless, out var fromEnv))
-            return fromEnv;
+            return ResolveHeadlessForLinux(fromEnv);
 
-        return options.Headless;
+        return ResolveHeadlessForLinux(options.Headless);
+    }
+
+    private static bool ResolveHeadlessForLinux(bool requestedHeadless)
+    {
+        if (!OperatingSystem.IsLinux() || !requestedHeadless)
+            return requestedHeadless;
+
+        var display = Environment.GetEnvironmentVariable("DISPLAY");
+        return string.IsNullOrWhiteSpace(display);
     }
 
     private sealed class ProfileExecution

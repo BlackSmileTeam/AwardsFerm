@@ -11,13 +11,26 @@ import './App.css'
 
 type Tab = 'sessions' | 'accounts' | 'proxies' | 'profit' | 'profile'
 
+function ProfileIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M5 20c0-3.314 3.134-6 7-6s7 2.686 7 6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
 function App() {
   const [authed, setAuthed] = useState(isAuthenticated())
   const [userLogin, setUserLogin] = useState(getLogin() ?? '')
   const [tab, setTab] = useState<Tab>('sessions')
   const [proxyPrefillName, setProxyPrefillName] = useState<string | null>(null)
   const [apiUp, setApiUp] = useState(false)
-  const [mskTime, setMskTime] = useState('')
 
   useEffect(() => {
     if (!authed) return
@@ -26,22 +39,6 @@ function App() {
     const interval = window.setInterval(() => void check(), 10000)
     return () => window.clearInterval(interval)
   }, [authed])
-
-  useEffect(() => {
-    const tick = () => {
-      setMskTime(
-        new Date().toLocaleTimeString('ru-RU', {
-          timeZone: 'Europe/Moscow',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-        }),
-      )
-    }
-    tick()
-    const id = window.setInterval(tick, 1000)
-    return () => window.clearInterval(id)
-  }, [])
 
   const onLogout = () => {
     clearAuth()
@@ -64,21 +61,28 @@ function App() {
   return (
     <div className="app">
       <header className="header">
-        <div>
-          <h1>AwardsFerm</h1>
-          <p className="subtitle">
-            {userLogin} · админ-панель
-          </p>
+        <div className="header-top">
+          <div className="header-brand">
+            <h1>AwardsFerm</h1>
+            <button
+              type="button"
+              className={`header-profile-btn${tab === 'profile' ? ' header-profile-btn-active' : ''}`}
+              onClick={() => setTab('profile')}
+              aria-label="Профиль"
+              title="Профиль"
+            >
+              <ProfileIcon />
+            </button>
+          </div>
+          <div className="header-meta">
+            <span className={`badge ${apiUp ? 'badge-ok' : 'badge-warn'}`}>
+              API {apiUp ? 'доступен' : 'недоступен'}
+            </span>
+          </div>
         </div>
-        <div className="header-meta">
-          <span className="badge">МСК {mskTime}</span>
-          <span className={`badge ${apiUp ? 'badge-ok' : 'badge-warn'}`}>
-            API {apiUp ? 'доступен' : 'недоступен'}
-          </span>
-          <button className="btn btn-secondary btn-sm" onClick={onLogout}>
-            Выйти
-          </button>
-        </div>
+        <p className="subtitle">
+          {userLogin} · админ-панель
+        </p>
       </header>
 
       <nav className="app-tabs">
@@ -94,7 +98,10 @@ function App() {
         <button className={`tab-btn${tab === 'profit' ? ' tab-btn-active' : ''}`} onClick={() => setTab('profit')}>
           Прибыль
         </button>
-        <button className={`tab-btn${tab === 'profile' ? ' tab-btn-active' : ''}`} onClick={() => setTab('profile')}>
+        <button
+          className={`tab-btn tab-btn-profile-desktop${tab === 'profile' ? ' tab-btn-active' : ''}`}
+          onClick={() => setTab('profile')}
+        >
           Профиль
         </button>
       </nav>
@@ -117,7 +124,7 @@ function App() {
         />
       )}
       {tab === 'profit' && <ProfitDashboard />}
-      {tab === 'profile' && <ProfilePanel login={userLogin} />}
+      {tab === 'profile' && <ProfilePanel login={userLogin} onLogout={onLogout} />}
 
       <footer className="footer">
         <span>SQLite · headless · логи в реальном времени (SignalR)</span>
