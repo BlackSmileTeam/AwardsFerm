@@ -622,6 +622,17 @@
   color: #9aa0a6;
 }
 
+.captcha-banner {
+  margin: 0.65rem 0 0;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #5c4a1f;
+  background: rgba(253, 214, 99, 0.08);
+  color: #fdd663;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
 .screenshot-placeholder {
   color: #5f6368;
   font-size: 0.9rem;

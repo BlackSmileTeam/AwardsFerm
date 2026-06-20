@@ -165,6 +165,32 @@ public sealed class SessionRunnerService
         }
     }
 
+    public async Task<string?> GetPreviewFrameAsync(string profileId, CancellationToken cancellationToken = default)
+    {
+        if (!await IsWorkerHealthyAsync(cancellationToken))
+            return null;
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient("worker-quick");
+            var response = await client.GetAsync(
+                $"{GetWorkerBaseUrl()}/internal/preview/{profileId}/frame",
+                cancellationToken);
+            if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+                return null;
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            var payload = await response.Content.ReadFromJsonAsync<PreviewFrameResponse>(cancellationToken);
+            return payload?.ImageBase64;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Не удалось получить кадр просмотра для {ProfileId}", profileId);
+            return null;
+        }
+    }
+
     private void ApplySlotSettings(StartSessionRequest request)
     {
         if (request.AdAccountId is null || string.IsNullOrWhiteSpace(request.ProfileId))
@@ -239,6 +265,11 @@ public sealed class SessionRunnerService
         public string ProfileId { get; set; } = "session-001";
         public bool AutoRestart { get; set; } = true;
         public YandexGamesSearchOptions Options { get; set; } = new();
+    }
+
+    private sealed class PreviewFrameResponse
+    {
+        public string? ImageBase64 { get; set; }
     }
 
     private void ScheduleStopIfNeeded(SessionInfo session)

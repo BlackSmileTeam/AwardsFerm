@@ -200,6 +200,20 @@ public sealed class SessionsController : ControllerBase
         }
     }
 
+    [HttpGet("profile/{profileId}/preview/frame")]
+    public async Task<IActionResult> GetPreviewFrameByProfile(string profileId, CancellationToken cancellationToken)
+    {
+        var userId = GetUserId();
+        var adAccountId = await _resolver.ResolveAdAccountByProfileAsync(userId, profileId, cancellationToken);
+        if (adAccountId is null)
+            return NotFound();
+        if (!await _resolver.UserOwnsAccountAsync(userId, adAccountId.Value, cancellationToken))
+            return Forbid();
+
+        var frame = await _runner.GetPreviewFrameAsync(profileId, cancellationToken);
+        return frame is null ? NoContent() : Ok(new { imageBase64 = frame });
+    }
+
     [HttpPost("{sessionId}/pause")]
     public async Task<IActionResult> PauseById(string sessionId, CancellationToken cancellationToken)
     {

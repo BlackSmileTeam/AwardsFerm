@@ -109,8 +109,12 @@ public sealed class SessionExecutionService
     public void SetPreview(string profileId, bool enabled)
     {
         _previewCoordinator.SetEnabled(profileId, enabled);
+        if (enabled)
+            _previewCoordinator.RequestImmediateCapture(profileId);
         _logger.LogInformation("Profile {ProfileId}: просмотр {State}", profileId, enabled ? "вкл" : "выкл");
     }
+
+    public string? GetPreviewFrame(string profileId) => _previewCoordinator.GetLastFrame(profileId);
 
     public async Task PreviewClickAsync(
         string profileId,

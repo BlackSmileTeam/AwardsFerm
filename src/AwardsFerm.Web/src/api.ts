@@ -208,6 +208,16 @@ export async function setPreviewByProfile(profileId: string, enabled: boolean): 
   }
 }
 
+export async function fetchPreviewFrame(profileId: string): Promise<string | null> {
+  const res = await apiFetch(
+    `/api/sessions/profile/${encodeURIComponent(profileId)}/preview/frame`,
+  )
+  if (res.status === 204) return null
+  if (!res.ok) return null
+  const data = (await res.json()) as { imageBase64?: string }
+  return data.imageBase64 ?? null
+}
+
 export async function previewClickByProfile(
   profileId: string,
   xRatio: number,

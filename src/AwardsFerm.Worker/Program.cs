@@ -92,6 +92,12 @@ app.MapPost("/internal/preview/{profileId}/click", async (
     }
 });
 
+app.MapGet("/internal/preview/{profileId}/frame", (string profileId, SessionExecutionService executor) =>
+{
+    var frame = executor.GetPreviewFrame(profileId);
+    return frame is null ? Results.NoContent() : Results.Ok(new { imageBase64 = frame });
+});
+
 app.MapPost("/internal/stop", async (SessionExecutionService executor, CancellationToken cancellationToken) =>
 {
     foreach (var profileId in new[] { "session-001", "session-002", "session-003" })

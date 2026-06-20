@@ -487,7 +487,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
         }
         catch (Exception ex)
         {
-            await TryCaptureScreenshotAsync(sessionId, activePage);
+            await TryCaptureScreenshotAsync(sessionId, profile.Id, activePage);
 
             if (IsBrowserClosedException(ex))
             {
@@ -650,9 +650,10 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                 }
 
                 if (activePage.TryResolve(out var page) && page is not null)
-                    await CaptureScreenshotAsync(sessionId, page, sessionCt);
+                    await CaptureScreenshotAsync(sessionId, profileId, page, sessionCt);
 
-                await Task.Delay(1200, sessionCt);
+                var delayMs = _previewCoordinator.TakeImmediateCaptureRequest(profileId) ? 200 : 1200;
+                await Task.Delay(delayMs, sessionCt);
             }
             catch (OperationCanceledException)
             {
@@ -669,14 +670,14 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
         }
     }
 
-    private async Task TryCaptureScreenshotAsync(string sessionId, ActivePageHolder? activePage)
+    private async Task TryCaptureScreenshotAsync(string sessionId, string profileId, ActivePageHolder? activePage)
     {
         if (activePage is null || !activePage.TryResolve(out var page) || page is null)
             return;
 
         try
         {
-            await CaptureScreenshotAsync(sessionId, page, CancellationToken.None);
+            await CaptureScreenshotAsync(sessionId, profileId, page, CancellationToken.None);
         }
         catch
         {
@@ -684,7 +685,11 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
         }
     }
 
-    private async Task CaptureScreenshotAsync(string sessionId, IPage page, CancellationToken sessionCt)
+    private async Task CaptureScreenshotAsync(
+        string sessionId,
+        string profileId,
+        IPage page,
+        CancellationToken sessionCt)
     {
         if (page.IsClosed)
             return;
@@ -692,18 +697,14 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
         var bytes = await page.ScreenshotAsync(new PageScreenshotOptions
         {
             Type = ScreenshotType.Jpeg,
-            Quality = 60,
+            Quality = 55,
             FullPage = false,
             Timeout = 8_000,
             Animations = ScreenshotAnimations.Disabled
         });
 
-        await _eventReporter.ReportAsync(new SessionEvent
-        {
-            SessionId = sessionId,
-            Type = SessionEventType.Screenshot,
-            ScreenshotBase64 = Convert.ToBase64String(bytes)
-        }, sessionCt);
+        var base64 = Convert.ToBase64String(bytes);
+        _previewCoordinator.SetLastFrame(profileId, base64);
     }
 
     private static async Task<ILocator> FindSearchInputAsync(IPage page)

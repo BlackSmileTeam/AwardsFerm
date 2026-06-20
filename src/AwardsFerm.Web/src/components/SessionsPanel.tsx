@@ -16,6 +16,7 @@ import {
   previewClickByProfile,
   resumeSessionByProfile,
   setPreviewByProfile,
+  fetchPreviewFrame,
   startSession,
   stopSessionByProfile,
   updateSlot,
@@ -60,7 +61,6 @@ export function SessionsPanel() {
   const [proxies, setProxies] = useState<ProxyConfig[]>([])
 
   const sessionIdToProfile = useRef<Record<string, string>>({})
-  const previewOpenRef = useRef<Record<string, boolean>>({})
   const confirmResolverRef = useRef<((value: boolean) => void) | null>(null)
   const slotConfigsRef = useRef(slotConfigs)
   const slotsRef = useRef(slots)
@@ -144,10 +144,6 @@ export function SessionsPanel() {
             ? { ...next.session, trafficBytes: event.trafficBytes }
             : next.session,
         }
-      }
-
-      if (event.type === 'Screenshot' && event.screenshotBase64 && previewOpenRef.current[profileId]) {
-        next = { ...next, screenshotBase64: event.screenshotBase64 }
       }
 
       if (event.type === 'Completed') {
@@ -298,15 +294,19 @@ export function SessionsPanel() {
     void syncSlotsWithSessions(selectedAccountId).catch(() => {})
   }, [selectedAccountId, syncSlotsWithSessions])
 
-  const onPreviewChange = useCallback((profileId: string, open: boolean) => {
-    previewOpenRef.current[profileId] = open
-    void setPreviewByProfile(profileId, open).catch(() => {})
-    if (!open) {
-      setSlots((prev) => ({
-        ...prev,
-        [profileId]: { ...prev[profileId], screenshotBase64: null },
-      }))
-    }
+  const onScreenshotUpdate = useCallback((profileId: string, base64: string | null) => {
+    setSlots((prev) => ({
+      ...prev,
+      [profileId]: { ...prev[profileId], screenshotBase64: base64 },
+    }))
+  }, [])
+
+  const onPreviewClose = useCallback((profileId: string) => {
+    void setPreviewByProfile(profileId, false).catch(() => {})
+    setSlots((prev) => ({
+      ...prev,
+      [profileId]: { ...prev[profileId], screenshotBase64: null },
+    }))
   }, [])
 
   const onStart = async (profileId: string) => {
@@ -548,7 +548,8 @@ export function SessionsPanel() {
               onResume={() => void onResume(slot.profileId)}
               onDelete={() => void onDeleteSlot(slot.profileId)}
               onSlotChange={(patch) => void onSlotChange(slot.profileId, patch)}
-              onPreviewChange={(open) => onPreviewChange(slot.profileId, open)}
+              onPreviewClose={() => onPreviewClose(slot.profileId)}
+              onScreenshotUpdate={(base64) => onScreenshotUpdate(slot.profileId, base64)}
             />
           ))}
         </div>
@@ -585,7 +586,8 @@ function SessionCard({
   onResume,
   onDelete,
   onSlotChange,
-  onPreviewChange,
+  onPreviewClose,
+  onScreenshotUpdate,
 }: {
   config: SessionSlotConfig
   proxies: ProxyConfig[]
@@ -599,7 +601,8 @@ function SessionCard({
   onSlotChange: (
     patch: Partial<Pick<SessionSlotConfig, 'scheduleEnabled' | 'scheduledStartMsk' | 'stopAtMsk' | 'autoRestart' | 'proxyEnabled' | 'proxyId'>>,
   ) => void
-  onPreviewChange: (open: boolean) => void
+  onPreviewClose: () => void
+  onScreenshotUpdate: (base64: string | null) => void
 }) {
   const logViewRef = useRef<HTMLDivElement>(null)
   const diagnosticViewRef = useRef<HTMLDivElement>(null)
@@ -609,6 +612,7 @@ function SessionCard({
   const [clickPending, setClickPending] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewFullscreen, setPreviewFullscreen] = useState(false)
+  const [previewLoading, setPreviewLoading] = useState(false)
   const sessionStatus = normalizeStatus(state.session?.status)
   const isRunning = sessionStatus === 'Starting' || sessionStatus === 'Running'
   const isPaused = sessionStatus === 'Paused'
@@ -629,20 +633,30 @@ function SessionCard({
     state.diagnosticLogs.length > 0
       ? state.diagnosticLogs
       : state.session?.diagnosticLogs ?? []
-  const captchaPending = displayLogs.some((line) => /капч|робот|showcaptcha/i.test(line))
+  const captchaPending = displayLogs.some((line) =>
+    /обнаружена капча|автоклик не помог|showcaptcha/i.test(line),
+  )
 
   useEffect(() => {
-    if (captchaPending && !previewOpen && isOccupied) {
-      setPreviewOpen(true)
-      onPreviewChange(true)
-    }
-  }, [captchaPending, previewOpen, isOccupied, onPreviewChange])
+    if (!previewOpen) return
+    let cancelled = false
 
-  useEffect(() => {
-    if (captchaPending && previewOpen) {
-      setPreviewFullscreen(true)
+    const pullFrame = async () => {
+      try {
+        const frame = await fetchPreviewFrame(config.profileId)
+        if (!cancelled && frame) onScreenshotUpdate(frame)
+      } catch {
+        /* ignore */
+      }
     }
-  }, [captchaPending, previewOpen])
+
+    void pullFrame()
+    const id = window.setInterval(() => void pullFrame(), 1000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [previewOpen, config.profileId, onScreenshotUpdate])
 
   useEffect(() => {
     if (!previewFullscreen) return
@@ -676,15 +690,36 @@ function SessionCard({
     if (!isOccupied && previewOpen) {
       setPreviewOpen(false)
       setPreviewFullscreen(false)
-      onPreviewChange(false)
+      onPreviewClose()
     }
-  }, [isOccupied, previewOpen, onPreviewChange])
+  }, [isOccupied, previewOpen, onPreviewClose])
+
+  const closePreview = () => {
+    setPreviewOpen(false)
+    setPreviewFullscreen(false)
+    onPreviewClose()
+  }
+
+  const openPreview = async () => {
+    setPreviewOpen(true)
+    setPreviewLoading(true)
+    try {
+      await setPreviewByProfile(config.profileId, true)
+      const frame = await fetchPreviewFrame(config.profileId)
+      if (frame) onScreenshotUpdate(frame)
+    } catch {
+      setPreviewOpen(false)
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
 
   const togglePreview = () => {
-    const next = !previewOpen
-    setPreviewOpen(next)
-    if (!next) setPreviewFullscreen(false)
-    onPreviewChange(next)
+    if (previewOpen) {
+      closePreview()
+      return
+    }
+    void openPreview()
   }
 
   const toggleFullscreen = () => {
@@ -910,6 +945,12 @@ function SessionCard({
         <div className="progress-fill" style={{ width: `${progress}%` }} />
       </div>
 
+      {captchaPending && !previewOpen && isOccupied && (
+        <div className="captcha-banner">
+          Обнаружена капча — нажмите «Просмотр», затем «На весь экран» и кликните по галочке
+        </div>
+      )}
+
       {previewOpen &&
         (() => {
           const previewPanel = (
@@ -927,17 +968,19 @@ function SessionCard({
                     type="button"
                     className="btn btn-ghost btn-sm"
                     onClick={toggleFullscreen}
-                    title={previewFullscreen ? 'Выйти из полного экрана (Esc)' : 'На весь экран'}
+                    title={previewFullscreen ? 'Выйти из полного экрана (Esc)' : 'Развернуть на весь экран'}
                   >
-                    {previewFullscreen ? 'Свернуть' : 'На весь экран'}
+                    {previewFullscreen ? 'Выйти из полного экрана' : 'На весь экран'}
                   </button>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={togglePreview}>
-                    Скрыть
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={closePreview}>
+                    Закрыть просмотр
                   </button>
                 </div>
               </div>
               <div className={`browser-viewport${clickPending ? ' browser-viewport-clicking' : ''}`}>
-                {state.screenshotBase64 ? (
+                {previewLoading ? (
+                  <span className="screenshot-placeholder">Подключение просмотра…</span>
+                ) : state.screenshotBase64 ? (
                   <img
                     ref={screenshotRef}
                     className="screenshot screenshot-interactive"
@@ -947,13 +990,13 @@ function SessionCard({
                     onClick={(e) => void handleScreenshotClick(e)}
                   />
                 ) : (
-                  <span className="screenshot-placeholder">Ожидание кадра…</span>
+                  <span className="screenshot-placeholder">Ожидание кадра… (обновление каждую секунду)</span>
                 )}
               </div>
               <p className="preview-hint">
                 {captchaPending
                   ? 'Кликните по галочке «Я не робот». Esc — выйти из полного экрана'
-                  : 'Клики по экрану передаются в браузер сессии'}
+                  : 'Клики по изображению передаются в браузер. «Закрыть просмотр» — выключить трансляцию'}
               </p>
             </div>
           )
