@@ -138,6 +138,24 @@ public sealed class SessionExecutionService
         _logger.LogInformation("Profile {ProfileId}: просмотр {State}", profileId, enabled ? "вкл" : "выкл");
     }
 
+    public async Task<string?> GetPreviewFrameAsync(
+        string profileId,
+        CancellationToken cancellationToken = default)
+    {
+        var cached = _previewCoordinator.GetLastFrame(profileId);
+        if (!string.IsNullOrWhiteSpace(cached))
+            return cached;
+
+        if (!_previewCoordinator.IsEnabled(profileId))
+            return null;
+
+        var frame = await _remoteInput.TryCaptureFrameAsync(profileId, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(frame))
+            _previewCoordinator.SetLastFrame(profileId, frame);
+
+        return frame;
+    }
+
     public string? GetPreviewFrame(string profileId) => _previewCoordinator.GetLastFrame(profileId);
 
     public async Task PreviewClickAsync(

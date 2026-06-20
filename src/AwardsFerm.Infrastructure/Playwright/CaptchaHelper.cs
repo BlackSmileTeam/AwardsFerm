@@ -12,11 +12,16 @@ internal static class CaptchaHelper
         "text=Я не робот",
         "text=Подтвердите, что запросы отправляли вы",
         "text=Нажмите, чтобы продолжить",
+        "text=Captcha Verification",
+        "text=verify you're not a robot",
         ".CheckboxCaptcha",
         ".SmartCaptcha",
+        ".smart-captcha",
+        "[data-testid='smartCaptcha-container']",
+        "[data-testid='checkbox-captcha']",
+        "input[name='smart-token']",
         "iframe[src*='captcha']",
-        "iframe[src*='smartcaptcha']",
-        "[data-testid='checkbox-captcha']"
+        "iframe[src*='smartcaptcha']"
     ];
 
     private static readonly string[] CheckboxSelectors =
@@ -31,13 +36,34 @@ internal static class CaptchaHelper
         "input[type='checkbox']"
     ];
 
+    private static readonly string[] ManualOnlyTextMarkers =
+    [
+        "Captcha Verification",
+        "verify you're not a robot",
+        "Please verify you're not a robot",
+        "smart-captcha",
+        "SmartCaptcha"
+    ];
+
     public static async Task<bool> IsPresentAsync(IPage page)
     {
-        var url = page.Url;
-        if (url.Contains("showcaptcha", StringComparison.OrdinalIgnoreCase) ||
-            url.Contains("checkcaptcha", StringComparison.OrdinalIgnoreCase) ||
-            url.Contains("/captcha", StringComparison.OrdinalIgnoreCase))
+        if (page.IsClosed)
+            return false;
+
+        if (IsCaptchaUrl(page.Url))
             return true;
+
+        if (await HasSmartCaptchaDomAsync(page))
+            return true;
+
+        if (await HasCaptchaTextAsync(page))
+            return true;
+
+        foreach (var frame in page.Frames)
+        {
+            if (IsCaptchaUrl(frame.Url))
+                return true;
+        }
 
         foreach (var selector in CaptchaSelectors)
         {
@@ -56,8 +82,51 @@ internal static class CaptchaHelper
         return false;
     }
 
+    /// <summary>
+    /// Yandex SmartCaptcha (ads-captcha) — только ручное решение через «Просмотр».
+    /// </summary>
+    public static async Task<bool> RequiresManualSolveAsync(IPage page)
+    {
+        if (page.IsClosed)
+            return false;
+
+        var url = page.Url;
+        if (url.Contains("ads-captcha.yandex.ru", StringComparison.OrdinalIgnoreCase) ||
+            url.Contains("ads-captcha.yandex.", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (await HasSmartCaptchaDomAsync(page))
+            return true;
+
+        try
+        {
+            var body = await page.Locator("body").InnerTextAsync();
+            foreach (var marker in ManualOnlyTextMarkers)
+            {
+                if (body.Contains(marker, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        foreach (var frame in page.Frames)
+        {
+            if (frame.Url.Contains("smartcaptcha.cloud.yandex.ru", StringComparison.OrdinalIgnoreCase) &&
+                frame.Url.Contains("ads-captcha", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
     public static async Task<bool> TryAutoSolveAsync(IPage page, CancellationToken cancellationToken = default)
     {
+        if (await RequiresManualSolveAsync(page))
+            return false;
+
         foreach (var frame in page.Frames)
         {
             if (await TryClickCheckboxInFrameAsync(page, frame, cancellationToken))
@@ -109,32 +178,6 @@ internal static class CaptchaHelper
         return !await IsPresentAsync(page);
     }
 
-    private static async Task<bool> TryClickCheckboxInFrameAsync(
-        IPage page,
-        IFrame frame,
-        CancellationToken cancellationToken)
-    {
-        foreach (var selector in CheckboxSelectors)
-        {
-            try
-            {
-                var checkbox = frame.Locator(selector).First;
-                if (await checkbox.CountAsync() == 0 || !await checkbox.IsVisibleAsync())
-                    continue;
-
-                await checkbox.ClickAsync(new LocatorClickOptions { Timeout = 5000 });
-                await HumanBehavior.DelayAsync(2500, 4000, cancellationToken);
-                return !await IsPresentAsync(page);
-            }
-            catch
-            {
-                // try next selector
-            }
-        }
-
-        return false;
-    }
-
     public static async Task WaitForManualSolveAsync(
         IPage page,
         string sessionId,
@@ -146,7 +189,30 @@ internal static class CaptchaHelper
             return;
 
         var pageUrl = page.Url;
+        var manualOnly = await RequiresManualSolveAsync(page);
         var headless = ResolveHeadlessMode();
+
+        if (manualOnly)
+        {
+            await reporter.ReportAsync(new SessionEvent
+            {
+                SessionId = sessionId,
+                Type = SessionEventType.Log,
+                Message = $"⚠ Обнаружена SmartCaptcha ({pageUrl}) — решается только вручную"
+            }, cancellationToken);
+
+            await reporter.ReportAsync(new SessionEvent
+            {
+                SessionId = sessionId,
+                Type = SessionEventType.Log,
+                Message = headless
+                    ? "⚠ Откройте «Просмотр» → «На весь экран» и пройдите капчу на экране"
+                    : "⚠ Откройте «Просмотр» и пройдите капчу — автоматически она не решается"
+            }, cancellationToken);
+
+            await WaitUntilResolvedAsync(page, sessionId, reporter, cancellationToken, maxWaitMinutes: 15);
+            return;
+        }
 
         await reporter.ReportAsync(new SessionEvent
         {
@@ -219,12 +285,34 @@ internal static class CaptchaHelper
             Message = "⚠ Автоклик не помог — откройте «Просмотр» и кликните по капче…"
         }, cancellationToken);
 
+        await WaitUntilResolvedAsync(page, sessionId, reporter, cancellationToken, maxWaitMinutes);
+    }
+
+    private static async Task WaitUntilResolvedAsync(
+        IPage page,
+        string sessionId,
+        ISessionEventReporter reporter,
+        CancellationToken cancellationToken,
+        int maxWaitMinutes)
+    {
         var deadline = DateTimeOffset.UtcNow.AddMinutes(maxWaitMinutes);
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (await TryAutoSolveAsync(page, cancellationToken) || !await IsPresentAsync(page))
+            if (!await IsPresentAsync(page))
+            {
+                await reporter.ReportAsync(new SessionEvent
+                {
+                    SessionId = sessionId,
+                    Type = SessionEventType.Log,
+                    Message = "✓ Капча пройдена, продолжаем сценарий"
+                }, cancellationToken);
+                await HumanBehavior.DelayAsync(2000, 4000, cancellationToken);
+                return;
+            }
+
+            if (!await RequiresManualSolveAsync(page) && await TryAutoSolveAsync(page, cancellationToken))
             {
                 await reporter.ReportAsync(new SessionEvent
                 {
@@ -240,7 +328,91 @@ internal static class CaptchaHelper
         }
 
         throw new InvalidOperationException(
-            $"Капча не решена за {maxWaitMinutes} мин. Откройте «Просмотр», кликните по капче и запустите сессию снова.");
+            $"Капча не решена за {maxWaitMinutes} мин. Откройте «Просмотр», пройдите капчу и запустите сессию снова.");
+    }
+
+    private static bool IsCaptchaUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return false;
+
+        return url.Contains("showcaptcha", StringComparison.OrdinalIgnoreCase) ||
+               url.Contains("checkcaptcha", StringComparison.OrdinalIgnoreCase) ||
+               url.Contains("ads-captcha.yandex.", StringComparison.OrdinalIgnoreCase) ||
+               url.Contains("/captcha", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<bool> HasSmartCaptchaDomAsync(IPage page)
+    {
+        var domSelectors = new[]
+        {
+            ".smart-captcha[data-sitekey]",
+            "[data-testid='smartCaptcha-container']",
+            "input[name='smart-token']",
+            "iframe[data-testid='checkbox-iframe']",
+            "iframe[data-testid='backend-iframe']"
+        };
+
+        foreach (var selector in domSelectors)
+        {
+            try
+            {
+                var locator = page.Locator(selector).First;
+                if (await locator.CountAsync() > 0 && await locator.IsVisibleAsync())
+                    return true;
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        return false;
+    }
+
+    private static async Task<bool> HasCaptchaTextAsync(IPage page)
+    {
+        try
+        {
+            var body = await page.Locator("body").InnerTextAsync();
+            if (string.IsNullOrWhiteSpace(body))
+                return false;
+
+            return body.Contains("Captcha Verification", StringComparison.OrdinalIgnoreCase) ||
+                   body.Contains("verify you're not a robot", StringComparison.OrdinalIgnoreCase) ||
+                   body.Contains("Я не робот", StringComparison.OrdinalIgnoreCase) ||
+                   body.Contains("Подтвердите, что запросы отправляли вы", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static async Task<bool> TryClickCheckboxInFrameAsync(
+        IPage page,
+        IFrame frame,
+        CancellationToken cancellationToken)
+    {
+        foreach (var selector in CheckboxSelectors)
+        {
+            try
+            {
+                var checkbox = frame.Locator(selector).First;
+                if (await checkbox.CountAsync() == 0 || !await checkbox.IsVisibleAsync())
+                    continue;
+
+                await checkbox.ClickAsync(new LocatorClickOptions { Timeout = 5000 });
+                await HumanBehavior.DelayAsync(2500, 4000, cancellationToken);
+                return !await IsPresentAsync(page);
+            }
+            catch
+            {
+                // try next selector
+            }
+        }
+
+        return false;
     }
 
     private static bool ResolveHeadlessMode()

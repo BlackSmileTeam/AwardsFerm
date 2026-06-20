@@ -92,9 +92,12 @@ app.MapPost("/internal/preview/{profileId}/click", async (
     }
 });
 
-app.MapGet("/internal/preview/{profileId}/frame", (string profileId, SessionExecutionService executor) =>
+app.MapGet("/internal/preview/{profileId}/frame", async (
+    string profileId,
+    SessionExecutionService executor,
+    CancellationToken cancellationToken) =>
 {
-    var frame = executor.GetPreviewFrame(profileId);
+    var frame = await executor.GetPreviewFrameAsync(profileId, cancellationToken);
     return frame is null ? Results.NoContent() : Results.Ok(new { imageBase64 = frame });
 });
 

@@ -168,7 +168,10 @@ public sealed class PlaywrightBrowserFactory
         if (isLinux)
         {
             common.Add("--disable-gpu");
-            common.Add("--disable-software-rasterizer");
+            // На Xvfb software rasterizer нужен для скриншотов «Просмотра».
+            var hasDisplay = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DISPLAY"));
+            if (!hasDisplay)
+                common.Add("--disable-software-rasterizer");
         }
 
         if (profile.FormFactor == DeviceFormFactor.Desktop)

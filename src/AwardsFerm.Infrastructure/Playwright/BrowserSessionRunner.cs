@@ -272,7 +272,9 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                     sessionCt,
                     attempts: 2,
                     timeoutMs: 35_000,
-                    onProgress: msg => ReportLogAsync(sessionId, msg, sessionCt));
+                    onProgress: msg => ReportLogAsync(sessionId, msg, sessionCt),
+                    captchaSessionId: sessionId,
+                    captchaReporter: _eventReporter);
                 await ReportLogAsync(sessionId, "yandex.ru открыт", sessionCt);
                 await HumanBehavior.DelayAsync(3000, 5000, sessionCt);
                 await ReportLogAsync(sessionId, "Закрываем всплывающие окна…", sessionCt);
@@ -295,7 +297,12 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
             await RunStepAsync(sessionId, profile.Id, 3, "Переход на Яндекс Игры", activity, sessionCt, async () =>
             {
                 page = activePage!.Resolve();
-                await SessionNavigationHelper.GotoWithRetryAsync(page, "https://yandex.ru/games", sessionCt);
+                await SessionNavigationHelper.GotoWithRetryAsync(
+                    page,
+                    "https://yandex.ru/games",
+                    sessionCt,
+                    captchaSessionId: sessionId,
+                    captchaReporter: _eventReporter);
                 await HumanBehavior.DelayAsync(3000, 5000, sessionCt);
                 await YandexUiHelper.DismissPopupsAsync(page, sessionCt);
                 await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, _eventReporter, sessionCt);
@@ -332,7 +339,12 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                     var searchUrl =
                         $"https://yandex.ru/games/search?query={Uri.EscapeDataString(options.SearchQuery)}";
                     await ReportLogAsync(sessionId, "Поле поиска перекрыто — открываем поиск по URL", sessionCt);
-                    await SessionNavigationHelper.GotoWithRetryAsync(page, searchUrl, sessionCt);
+                    await SessionNavigationHelper.GotoWithRetryAsync(
+                        page,
+                        searchUrl,
+                        sessionCt,
+                        captchaSessionId: sessionId,
+                        captchaReporter: _eventReporter);
                     await HumanBehavior.DelayAsync(2000, 3500, sessionCt);
                 }
             });
@@ -365,7 +377,12 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                         sessionCt);
                     var searchUrl =
                         $"https://yandex.ru/games/search?query={Uri.EscapeDataString(options.SearchQuery)}";
-                    await SessionNavigationHelper.GotoWithRetryAsync(page, searchUrl, sessionCt);
+                    await SessionNavigationHelper.GotoWithRetryAsync(
+                        page,
+                        searchUrl,
+                        sessionCt,
+                        captchaSessionId: sessionId,
+                        captchaReporter: _eventReporter);
                     await HumanBehavior.DelayAsync(2500, 4000, sessionCt);
                     await YandexUiHelper.DismissPopupsAsync(page, sessionCt);
                     await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, _eventReporter, sessionCt);
@@ -750,14 +767,18 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
             {
                 if (!_previewCoordinator.IsEnabled(profileId))
                 {
-                    await Task.Delay(500, sessionCt);
+                    await Task.Delay(300, sessionCt);
                     continue;
                 }
 
                 if (activePage.TryResolve(out var page) && page is not null)
-                    await CaptureScreenshotAsync(sessionId, profileId, page, sessionCt);
+                {
+                    var frame = await SessionScreenshotHelper.CapturePageAsync(page, sessionCt);
+                    if (!string.IsNullOrWhiteSpace(frame))
+                        _previewCoordinator.SetLastFrame(profileId, frame);
+                }
 
-                var delayMs = _previewCoordinator.TakeImmediateCaptureRequest(profileId) ? 200 : 1200;
+                var delayMs = _previewCoordinator.TakeImmediateCaptureRequest(profileId) ? 250 : 800;
                 await Task.Delay(delayMs, sessionCt);
             }
             catch (OperationCanceledException)
@@ -782,7 +803,9 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
 
         try
         {
-            await CaptureScreenshotAsync(sessionId, profileId, page, CancellationToken.None);
+            var frame = await SessionScreenshotHelper.CapturePageAsync(page, CancellationToken.None);
+            if (!string.IsNullOrWhiteSpace(frame))
+                _previewCoordinator.SetLastFrame(profileId, frame);
         }
         catch
         {
@@ -796,20 +819,9 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
         IPage page,
         CancellationToken sessionCt)
     {
-        if (page.IsClosed)
-            return;
-
-        var bytes = await page.ScreenshotAsync(new PageScreenshotOptions
-        {
-            Type = ScreenshotType.Jpeg,
-            Quality = 55,
-            FullPage = false,
-            Timeout = 8_000,
-            Animations = ScreenshotAnimations.Disabled
-        });
-
-        var base64 = Convert.ToBase64String(bytes);
-        _previewCoordinator.SetLastFrame(profileId, base64);
+        var frame = await SessionScreenshotHelper.CapturePageAsync(page, sessionCt);
+        if (!string.IsNullOrWhiteSpace(frame))
+            _previewCoordinator.SetLastFrame(profileId, frame);
     }
 
     private static async Task<ILocator> FindSearchInputAsync(IPage page)

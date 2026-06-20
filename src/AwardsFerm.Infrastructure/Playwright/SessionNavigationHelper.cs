@@ -1,3 +1,4 @@
+using AwardsFerm.Core.Interfaces;
 using AwardsFerm.Infrastructure.Behavior;
 using Microsoft.Playwright;
 
@@ -20,7 +21,9 @@ internal static class SessionNavigationHelper
         CancellationToken cancellationToken = default,
         int attempts = 3,
         int timeoutMs = 60_000,
-        Func<string, Task>? onProgress = null)
+        Func<string, Task>? onProgress = null,
+        string? captchaSessionId = null,
+        ISessionEventReporter? captchaReporter = null)
     {
         Exception? last = null;
         for (var i = 0; i < attempts; i++)
@@ -35,6 +38,8 @@ internal static class SessionNavigationHelper
                 EnsureNavigationSucceeded(page, url);
                 if (onProgress is not null)
                     await onProgress($"Страница загружена: {page.Url}");
+                if (captchaSessionId is not null && captchaReporter is not null)
+                    await CaptchaHelper.WaitForManualSolveAsync(page, captchaSessionId, captchaReporter, cancellationToken);
                 return;
             }
             catch (Exception ex) when (IsRetryableNavigationError(ex) && i < attempts - 1)

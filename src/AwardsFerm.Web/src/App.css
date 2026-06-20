@@ -232,8 +232,41 @@
   gap: 0.75rem;
   flex-wrap: wrap;
   padding: 0.5rem 0;
+}
+
+.schedule-block {
   border-bottom: 1px solid #2d3348;
   margin-bottom: 0.5rem;
+  padding-bottom: 0.25rem;
+}
+
+.schedule-block .schedule-row {
+  padding: 0.35rem 0;
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.schedule-row-stop {
+  flex-wrap: nowrap;
+  padding-left: 1.45rem;
+}
+
+.schedule-label-inline {
+  cursor: default;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.schedule-row + .schedule-row,
+.schedule-block + .schedule-row {
+  border-bottom: 1px solid #2d3348;
+  margin-bottom: 0.5rem;
+}
+
+.log-panel-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .schedule-label {

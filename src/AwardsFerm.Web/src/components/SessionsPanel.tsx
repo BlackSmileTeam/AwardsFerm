@@ -470,6 +470,24 @@ export function SessionsPanel() {
     }
   }
 
+  const onClearLogs = useCallback((profileId: string) => {
+    setSlots((prev) => {
+      const slot = prev[profileId]
+      if (!slot) return prev
+      return {
+        ...prev,
+        [profileId]: {
+          ...slot,
+          logs: [],
+          diagnosticLogs: [],
+          session: slot.session
+            ? { ...slot.session, logs: [], diagnosticLogs: [] }
+            : null,
+        },
+      }
+    })
+  }, [])
+
   const onSlotChange = async (
     profileId: string,
     patch: Partial<Pick<SessionSlotConfig, 'label' | 'scheduleEnabled' | 'scheduledStartMsk' | 'stopAtMsk' | 'autoRestart' | 'proxyEnabled' | 'proxyId'>>,
@@ -606,6 +624,7 @@ export function SessionsPanel() {
               onSlotChange={(patch) => void onSlotChange(slot.profileId, patch)}
               onPreviewClose={() => onPreviewClose(slot.profileId)}
               onScreenshotUpdate={(base64) => onScreenshotUpdate(slot.profileId, base64)}
+              onClearLogs={() => onClearLogs(slot.profileId)}
             />
           ))}
         </div>
@@ -646,6 +665,7 @@ function SessionCard({
   onSlotChange,
   onPreviewClose,
   onScreenshotUpdate,
+  onClearLogs,
 }: {
   config: SessionSlotConfig
   proxies: ProxyConfig[]
@@ -663,6 +683,7 @@ function SessionCard({
   ) => void
   onPreviewClose: () => void
   onScreenshotUpdate: (base64: string | null) => void
+  onClearLogs: () => void
 }) {
   const logViewRef = useRef<HTMLDivElement>(null)
   const diagnosticViewRef = useRef<HTMLDivElement>(null)
@@ -676,6 +697,7 @@ function SessionCard({
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewFullscreen, setPreviewFullscreen] = useState(false)
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewWaiting, setPreviewWaiting] = useState(false)
   const sessionStatus = normalizeStatus(state.session?.status)
   const isRunning = sessionStatus === 'Starting' || sessionStatus === 'Running'
   const isPaused = sessionStatus === 'Paused'
@@ -716,20 +738,30 @@ function SessionCard({
   }, [menuOpen])
 
   useEffect(() => {
-    if (!previewOpen) return
+    if (!previewOpen) {
+      setPreviewWaiting(false)
+      return
+    }
     let cancelled = false
+    let attempts = 0
 
     const pullFrame = async () => {
+      attempts++
       try {
         const frame = await fetchPreviewFrame(config.profileId)
-        if (!cancelled && frame) onScreenshotUpdate(frame)
+        if (!cancelled && frame) {
+          onScreenshotUpdate(frame)
+          setPreviewWaiting(false)
+        } else if (!cancelled && attempts >= 8) {
+          setPreviewWaiting(true)
+        }
       } catch {
-        /* ignore */
+        if (!cancelled && attempts >= 8) setPreviewWaiting(true)
       }
     }
 
     void pullFrame()
-    const id = window.setInterval(() => void pullFrame(), 1000)
+    const id = window.setInterval(() => void pullFrame(), 800)
     return () => {
       cancelled = true
       window.clearInterval(id)
@@ -887,46 +919,50 @@ function SessionCard({
         </div>
       </div>
 
-      <div className="schedule-row">
-        <label className="schedule-label">
-          <input
-            type="checkbox"
-            checked={config.scheduleEnabled}
-            onChange={(e) =>
-              onSlotChange({
-                scheduleEnabled: e.target.checked,
-                scheduledStartMsk: config.scheduledStartMsk ?? '09:00',
-              })
-            }
-          />
-          Автозапуск (МСК)
-        </label>
-        <input
-          type="time"
-          className="schedule-time"
-          value={config.scheduledStartMsk ?? '09:00'}
-          disabled={!config.scheduleEnabled}
-          onChange={(e) => onSlotChange({ scheduledStartMsk: e.target.value })}
-        />
-        <label className="schedule-label">Остановить (МСК)</label>
-        <div className="schedule-time-wrap">
+      <div className="schedule-block">
+        <div className="schedule-row">
+          <label className="schedule-label">
+            <input
+              type="checkbox"
+              checked={config.scheduleEnabled}
+              onChange={(e) =>
+                onSlotChange({
+                  scheduleEnabled: e.target.checked,
+                  scheduledStartMsk: config.scheduledStartMsk ?? '09:00',
+                })
+              }
+            />
+            Автозапуск (МСК)
+          </label>
           <input
             type="time"
             className="schedule-time"
-            value={config.stopAtMsk ?? ''}
-            onChange={(e) => onSlotChange({ stopAtMsk: e.target.value || null })}
+            value={config.scheduledStartMsk ?? '09:00'}
+            disabled={!config.scheduleEnabled}
+            onChange={(e) => onSlotChange({ scheduledStartMsk: e.target.value })}
           />
-          {config.stopAtMsk ? (
-            <button
-              type="button"
-              className="schedule-time-clear"
-              onClick={() => onSlotChange({ stopAtMsk: null })}
-              title="Сбросить время остановки"
-              aria-label="Сбросить время остановки"
-            >
-              ×
-            </button>
-          ) : null}
+        </div>
+        <div className="schedule-row schedule-row-stop">
+          <label className="schedule-label schedule-label-inline">Остановить (МСК)</label>
+          <div className="schedule-time-wrap">
+            <input
+              type="time"
+              className="schedule-time"
+              value={config.stopAtMsk ?? ''}
+              onChange={(e) => onSlotChange({ stopAtMsk: e.target.value || null })}
+            />
+            {config.stopAtMsk ? (
+              <button
+                type="button"
+                className="schedule-time-clear"
+                onClick={() => onSlotChange({ stopAtMsk: null })}
+                title="Сбросить время остановки"
+                aria-label="Сбросить время остановки"
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -1052,7 +1088,7 @@ function SessionCard({
 
       {captchaPending && !previewOpen && isOccupied && (
         <div className="captcha-banner">
-          Обнаружена капча — нажмите «Просмотр», затем «На весь экран» и кликните по галочке
+          Обнаружена SmartCaptcha — откройте «Просмотр», «На весь экран» и пройдите проверку вручную
         </div>
       )}
 
@@ -1108,8 +1144,12 @@ function SessionCard({
                     title="Клик отправляется в браузер сессии"
                     onClick={(e) => void handleScreenshotClick(e)}
                   />
+                ) : previewWaiting ? (
+                  <span className="screenshot-placeholder">
+                    Кадр не получен — подождите или перезапустите «Просмотр». Если сессия на капче, пройдите её здесь.
+                  </span>
                 ) : (
-                  <span className="screenshot-placeholder">Ожидание кадра… (обновление каждую секунду)</span>
+                  <span className="screenshot-placeholder">Ожидание кадра… (обновление каждые 0,8 сек)</span>
                 )}
               </div>
             </div>
@@ -1122,30 +1162,47 @@ function SessionCard({
 
       <div className="log-panel-header">
         <span className="log-panel-title">Лог</span>
-        <button
-          type="button"
-          className={`btn-icon${copied ? ' btn-icon-ok' : ''}`}
-          onClick={() => void copyLogs()}
-          disabled={displayLogs.length === 0}
-          title={copied ? 'Скопировано' : 'Копировать лог'}
-          aria-label="Копировать лог"
-        >
-          {copied ? (
+        <div className="log-panel-actions">
+          <button
+            type="button"
+            className={`btn-icon${copied ? ' btn-icon-ok' : ''}`}
+            onClick={() => void copyLogs()}
+            disabled={displayLogs.length === 0}
+            title={copied ? 'Скопировано' : 'Копировать лог'}
+            aria-label="Копировать лог"
+          >
+            {copied ? (
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"
+                />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
+                />
+              </svg>
+            )}
+          </button>
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={onClearLogs}
+            disabled={displayLogs.length === 0 && displayDiagnosticLogs.length === 0}
+            title="Очистить лог и диагностику"
+            aria-label="Очистить лог и диагностику"
+          >
             <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
               <path
                 fill="currentColor"
-                d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"
+                d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"
               />
             </svg>
-          ) : (
-            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-              <path
-                fill="currentColor"
-                d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
-              />
-            </svg>
-          )}
-        </button>
+          </button>
+        </div>
       </div>
 
       <div ref={logViewRef} className="log-view session-log session-log-tall">
@@ -1177,29 +1234,45 @@ function SessionCard({
               </span>
               <span className="log-panel-title">Диагностика</span>
             </button>
-            <button
-              type="button"
-              className={`btn-icon${diagnosticCopied ? ' btn-icon-ok' : ''}`}
-              onClick={() => void copyDiagnosticLogs()}
-              title={diagnosticCopied ? 'Скопировано' : 'Копировать диагностику'}
-              aria-label="Копировать диагностику"
-            >
-              {diagnosticCopied ? (
+            <div className="log-panel-actions">
+              <button
+                type="button"
+                className={`btn-icon${diagnosticCopied ? ' btn-icon-ok' : ''}`}
+                onClick={() => void copyDiagnosticLogs()}
+                title={diagnosticCopied ? 'Скопировано' : 'Копировать диагностику'}
+                aria-label="Копировать диагностику"
+              >
+                {diagnosticCopied ? (
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                    <path
+                      fill="currentColor"
+                      d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"
+                    />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                    <path
+                      fill="currentColor"
+                      d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
+                    />
+                  </svg>
+                )}
+              </button>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={onClearLogs}
+                title="Очистить диагностику"
+                aria-label="Очистить диагностику"
+              >
                 <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
                   <path
                     fill="currentColor"
-                    d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"
+                    d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"
                   />
                 </svg>
-              ) : (
-                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                  <path
-                    fill="currentColor"
-                    d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
-                  />
-                </svg>
-              )}
-            </button>
+              </button>
+            </div>
           </div>
           {diagnosticExpanded ? (
             <div ref={diagnosticViewRef} className="log-view session-log diagnostic-log">

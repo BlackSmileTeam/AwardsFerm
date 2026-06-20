@@ -154,6 +154,7 @@ internal static class YandexUiHelper
                     Timeout = 60_000
                 });
                 await HumanBehavior.DelayAsync(2500, 4000, cancellationToken);
+                await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, reporter, cancellationToken);
             }
 
             await FocusGameTabAsync(context, page, cancellationToken);

@@ -60,4 +60,27 @@ public sealed class SessionRemoteInputCoordinator
             gate.Release();
         }
     }
+
+    public async Task<string?> TryCaptureFrameAsync(
+        string profileId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_pageResolvers.TryGetValue(profileId, out var resolver))
+            return null;
+
+        var gate = _locks.GetOrAdd(profileId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var page = resolver();
+            if (page is null)
+                return null;
+
+            return await SessionScreenshotHelper.CapturePageAsync(page, cancellationToken);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
 }
