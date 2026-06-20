@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using AwardsFerm.Core.Interfaces;
 using AwardsFerm.Core.Models;
+using AwardsFerm.Infrastructure.Playwright;
 
 namespace AwardsFerm.Worker.Services;
 
@@ -12,6 +13,7 @@ public sealed class SessionExecutionService
     private readonly IProfileRepository _profileRepository;
     private readonly ISessionPauseCoordinator _pauseCoordinator;
     private readonly ISessionPreviewCoordinator _previewCoordinator;
+    private readonly SessionRemoteInputCoordinator _remoteInput;
     private readonly ILogger<SessionExecutionService> _logger;
     private readonly ConcurrentDictionary<string, ProfileExecution> _byProfile = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
@@ -21,12 +23,14 @@ public sealed class SessionExecutionService
         IProfileRepository profileRepository,
         ISessionPauseCoordinator pauseCoordinator,
         ISessionPreviewCoordinator previewCoordinator,
+        SessionRemoteInputCoordinator remoteInput,
         ILogger<SessionExecutionService> logger)
     {
         _runner = runner;
         _profileRepository = profileRepository;
         _pauseCoordinator = pauseCoordinator;
         _previewCoordinator = previewCoordinator;
+        _remoteInput = remoteInput;
         _logger = logger;
     }
 
@@ -68,6 +72,7 @@ public sealed class SessionExecutionService
             _byProfile[request.ProfileId] = execution;
             _pauseCoordinator.Clear(request.ProfileId);
             _previewCoordinator.Clear(request.ProfileId);
+            _remoteInput.Clear(request.ProfileId);
 
             _logger.LogInformation(
                 "Profile {ProfileId}: принят запуск (session {SessionId})",
@@ -84,6 +89,7 @@ public sealed class SessionExecutionService
     {
         _pauseCoordinator.Clear(profileId);
         _previewCoordinator.Clear(profileId);
+        _remoteInput.Clear(profileId);
         var gate = _locks.GetOrAdd(profileId, _ => new SemaphoreSlim(1, 1));
         return StopWithGateAsync(profileId, gate, cancellationToken);
     }
@@ -104,6 +110,23 @@ public sealed class SessionExecutionService
     {
         _previewCoordinator.SetEnabled(profileId, enabled);
         _logger.LogInformation("Profile {ProfileId}: просмотр {State}", profileId, enabled ? "вкл" : "выкл");
+    }
+
+    public async Task PreviewClickAsync(
+        string profileId,
+        double xRatio,
+        double yRatio,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_previewCoordinator.IsEnabled(profileId))
+            throw new InvalidOperationException("Включите «Просмотр», чтобы кликать по экрану браузера.");
+
+        await _remoteInput.ClickAsync(profileId, xRatio, yRatio, cancellationToken);
+        _logger.LogDebug(
+            "Profile {ProfileId}: удалённый клик ({X:P0}, {Y:P0})",
+            profileId,
+            xRatio,
+            yRatio);
     }
 
     private async Task StopWithGateAsync(string profileId, SemaphoreSlim gate, CancellationToken cancellationToken)

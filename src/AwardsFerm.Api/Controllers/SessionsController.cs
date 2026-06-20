@@ -176,6 +176,30 @@ public sealed class SessionsController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("profile/{profileId}/preview/click")]
+    public async Task<IActionResult> PreviewClickByProfile(
+        string profileId,
+        [FromBody] PreviewClickRequest request,
+        CancellationToken cancellationToken)
+    {
+        var userId = GetUserId();
+        var adAccountId = await _resolver.ResolveAdAccountByProfileAsync(userId, profileId, cancellationToken);
+        if (adAccountId is null)
+            return NotFound();
+        if (!await _resolver.UserOwnsAccountAsync(userId, adAccountId.Value, cancellationToken))
+            return Forbid();
+
+        try
+        {
+            await _runner.PreviewClickAsync(profileId, request.XRatio, request.YRatio, cancellationToken);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
     [HttpPost("{sessionId}/pause")]
     public async Task<IActionResult> PauseById(string sessionId, CancellationToken cancellationToken)
     {
@@ -226,4 +250,10 @@ public sealed class SessionsController : ControllerBase
 public sealed class PreviewRequest
 {
     public bool Enabled { get; set; }
+}
+
+public sealed class PreviewClickRequest
+{
+    public double XRatio { get; set; }
+    public double YRatio { get; set; }
 }

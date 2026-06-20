@@ -161,7 +161,7 @@ internal static class CaptchaHelper
             {
                 SessionId = sessionId,
                 Type = SessionEventType.Log,
-                Message = "⚠ Headless-режим: капчу вручную решить нельзя — пробуем автоклик"
+                Message = "⚠ Headless-режим: откройте «Просмотр» и кликните по капче на экране"
             }, cancellationToken);
         }
         else
@@ -170,7 +170,7 @@ internal static class CaptchaHelper
             {
                 SessionId = sessionId,
                 Type = SessionEventType.Log,
-                Message = "Если автоклик не сработает — решите капчу в окне браузера"
+                Message = "Если автоклик не сработает — откройте «Просмотр» и кликните по капче на экране"
             }, cancellationToken);
         }
 
@@ -216,7 +216,7 @@ internal static class CaptchaHelper
         {
             SessionId = sessionId,
             Type = SessionEventType.Log,
-            Message = "⚠ Автоклик не помог — решите капчу вручную в окне браузера…"
+            Message = "⚠ Автоклик не помог — откройте «Просмотр» и кликните по капче…"
         }, cancellationToken);
 
         var deadline = DateTimeOffset.UtcNow.AddMinutes(maxWaitMinutes);
@@ -240,7 +240,7 @@ internal static class CaptchaHelper
         }
 
         throw new InvalidOperationException(
-            $"Капча не решена за {maxWaitMinutes} мин. Решите её в окне браузера и запустите сессию снова.");
+            $"Капча не решена за {maxWaitMinutes} мин. Откройте «Просмотр», кликните по капче и запустите сессию снова.");
     }
 
     private static bool ResolveHeadlessMode()

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   addSlot,
   ApiError,
@@ -12,6 +13,7 @@ import {
   fetchSlots,
   isHubConnected,
   pauseSessionByProfile,
+  previewClickByProfile,
   resumeSessionByProfile,
   setPreviewByProfile,
   startSession,
@@ -601,9 +603,12 @@ function SessionCard({
 }) {
   const logViewRef = useRef<HTMLDivElement>(null)
   const diagnosticViewRef = useRef<HTMLDivElement>(null)
+  const screenshotRef = useRef<HTMLImageElement>(null)
   const [copied, setCopied] = useState(false)
   const [diagnosticCopied, setDiagnosticCopied] = useState(false)
+  const [clickPending, setClickPending] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewFullscreen, setPreviewFullscreen] = useState(false)
   const sessionStatus = normalizeStatus(state.session?.status)
   const isRunning = sessionStatus === 'Starting' || sessionStatus === 'Running'
   const isPaused = sessionStatus === 'Paused'
@@ -624,6 +629,38 @@ function SessionCard({
     state.diagnosticLogs.length > 0
       ? state.diagnosticLogs
       : state.session?.diagnosticLogs ?? []
+  const captchaPending = displayLogs.some((line) => /капч|робот|showcaptcha/i.test(line))
+
+  useEffect(() => {
+    if (captchaPending && !previewOpen && isOccupied) {
+      setPreviewOpen(true)
+      onPreviewChange(true)
+    }
+  }, [captchaPending, previewOpen, isOccupied, onPreviewChange])
+
+  useEffect(() => {
+    if (captchaPending && previewOpen) {
+      setPreviewFullscreen(true)
+    }
+  }, [captchaPending, previewOpen])
+
+  useEffect(() => {
+    if (!previewFullscreen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [previewFullscreen])
+
+  useEffect(() => {
+    if (!previewFullscreen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewFullscreen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [previewFullscreen])
 
   useEffect(() => {
     const el = logViewRef.current
@@ -638,6 +675,7 @@ function SessionCard({
   useEffect(() => {
     if (!isOccupied && previewOpen) {
       setPreviewOpen(false)
+      setPreviewFullscreen(false)
       onPreviewChange(false)
     }
   }, [isOccupied, previewOpen, onPreviewChange])
@@ -645,7 +683,29 @@ function SessionCard({
   const togglePreview = () => {
     const next = !previewOpen
     setPreviewOpen(next)
+    if (!next) setPreviewFullscreen(false)
     onPreviewChange(next)
+  }
+
+  const toggleFullscreen = () => {
+    setPreviewFullscreen((prev) => !prev)
+  }
+
+  const handleScreenshotClick = async (event: React.MouseEvent<HTMLImageElement>) => {
+    const img = screenshotRef.current
+    if (!img || clickPending) return
+
+    const ratios = getImageClickRatios(img, event.clientX, event.clientY)
+    if (!ratios) return
+
+    setClickPending(true)
+    try {
+      await previewClickByProfile(config.profileId, ratios.xRatio, ratios.yRatio)
+    } catch {
+      /* ignore — next screenshot will refresh view */
+    } finally {
+      window.setTimeout(() => setClickPending(false), 400)
+    }
   }
 
   const copyLogs = async () => {
@@ -850,27 +910,58 @@ function SessionCard({
         <div className="progress-fill" style={{ width: `${progress}%` }} />
       </div>
 
-      {previewOpen && (
-        <div className="session-preview">
-          <div className="session-preview-header">
-            <span>Экран браузера</span>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={togglePreview}>
-              Скрыть
-            </button>
-          </div>
-          <div className="browser-viewport">
-            {state.screenshotBase64 ? (
-              <img
-                className="screenshot"
-                src={`data:image/jpeg;base64,${state.screenshotBase64}`}
-                alt="Экран браузера"
-              />
-            ) : (
-              <span className="screenshot-placeholder">Ожидание кадра…</span>
-            )}
-          </div>
-        </div>
-      )}
+      {previewOpen &&
+        (() => {
+          const previewPanel = (
+            <div
+              className={`session-preview${previewFullscreen ? ' session-preview-fullscreen' : ''}`}
+            >
+              <div className="session-preview-header">
+                <span>
+                  Экран браузера
+                  {captchaPending ? ' — кликните по капче' : ''}
+                  {previewFullscreen ? ' (полный экран)' : ''}
+                </span>
+                <div className="session-preview-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={toggleFullscreen}
+                    title={previewFullscreen ? 'Выйти из полного экрана (Esc)' : 'На весь экран'}
+                  >
+                    {previewFullscreen ? 'Свернуть' : 'На весь экран'}
+                  </button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={togglePreview}>
+                    Скрыть
+                  </button>
+                </div>
+              </div>
+              <div className={`browser-viewport${clickPending ? ' browser-viewport-clicking' : ''}`}>
+                {state.screenshotBase64 ? (
+                  <img
+                    ref={screenshotRef}
+                    className="screenshot screenshot-interactive"
+                    src={`data:image/jpeg;base64,${state.screenshotBase64}`}
+                    alt="Экран браузера — кликните для взаимодействия"
+                    title="Клик отправляется в браузер сессии"
+                    onClick={(e) => void handleScreenshotClick(e)}
+                  />
+                ) : (
+                  <span className="screenshot-placeholder">Ожидание кадра…</span>
+                )}
+              </div>
+              <p className="preview-hint">
+                {captchaPending
+                  ? 'Кликните по галочке «Я не робот». Esc — выйти из полного экрана'
+                  : 'Клики по экрану передаются в браузер сессии'}
+              </p>
+            </div>
+          )
+
+          return previewFullscreen
+            ? createPortal(previewPanel, document.body)
+            : previewPanel
+        })()}
 
       <div className="log-panel-header">
         <span className="log-panel-title">Лог</span>
@@ -961,6 +1052,32 @@ function formatTime(iso: string): string {
     return new Date(iso).toLocaleTimeString('ru-RU')
   } catch {
     return '--:--:--'
+  }
+}
+
+function getImageClickRatios(
+  img: HTMLImageElement,
+  clientX: number,
+  clientY: number,
+): { xRatio: number; yRatio: number } | null {
+  const rect = img.getBoundingClientRect()
+  const naturalW = img.naturalWidth
+  const naturalH = img.naturalHeight
+  if (!naturalW || !naturalH || rect.width <= 0 || rect.height <= 0) return null
+
+  const scale = Math.min(rect.width / naturalW, rect.height / naturalH)
+  const renderedW = naturalW * scale
+  const renderedH = naturalH * scale
+  const offsetX = (rect.width - renderedW) / 2
+  const offsetY = (rect.height - renderedH) / 2
+
+  const localX = clientX - rect.left - offsetX
+  const localY = clientY - rect.top - offsetY
+  if (localX < 0 || localY < 0 || localX > renderedW || localY > renderedH) return null
+
+  return {
+    xRatio: Math.min(1, Math.max(0, localX / renderedW)),
+    yRatio: Math.min(1, Math.max(0, localY / renderedH)),
   }
 }
 

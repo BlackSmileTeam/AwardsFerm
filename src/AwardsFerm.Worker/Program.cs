@@ -75,6 +75,23 @@ app.MapPost("/internal/preview/{profileId}", (string profileId, PreviewRequest r
     return Results.NoContent();
 });
 
+app.MapPost("/internal/preview/{profileId}/click", async (
+    string profileId,
+    PreviewClickRequest request,
+    SessionExecutionService executor,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        await executor.PreviewClickAsync(profileId, request.XRatio, request.YRatio, cancellationToken);
+        return Results.NoContent();
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Conflict(ex.Message);
+    }
+});
+
 app.MapPost("/internal/stop", async (SessionExecutionService executor, CancellationToken cancellationToken) =>
 {
     foreach (var profileId in new[] { "session-001", "session-002", "session-003" })
@@ -104,4 +121,10 @@ app.Run();
 public sealed class PreviewRequest
 {
     public bool Enabled { get; set; }
+}
+
+public sealed class PreviewClickRequest
+{
+    public double XRatio { get; set; }
+    public double YRatio { get; set; }
 }

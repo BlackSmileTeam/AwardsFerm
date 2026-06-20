@@ -18,6 +18,7 @@ public static class DependencyInjection
         services.AddSingleton<PlaywrightBrowserFactory>();
         services.AddSingleton<ISessionPauseCoordinator, SessionPauseCoordinator>();
         services.AddSingleton<ISessionPreviewCoordinator, SessionPreviewCoordinator>();
+        services.AddSingleton<SessionRemoteInputCoordinator>();
         services.AddSingleton<IBrowserSessionRunner, BrowserSessionRunner>();
         return services;
     }

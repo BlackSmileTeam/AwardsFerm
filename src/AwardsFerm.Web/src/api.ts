@@ -208,6 +208,24 @@ export async function setPreviewByProfile(profileId: string, enabled: boolean): 
   }
 }
 
+export async function previewClickByProfile(
+  profileId: string,
+  xRatio: number,
+  yRatio: number,
+): Promise<void> {
+  const res = await apiFetch(
+    `/api/sessions/profile/${encodeURIComponent(profileId)}/preview/click`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ xRatio, yRatio }),
+    },
+  )
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Не удалось отправить клик')
+  }
+}
+
 /** @deprecated используйте resumeSessionByProfile */
 export async function resumeSession(sessionId: string): Promise<void> {
   const res = await apiFetch(`/api/sessions/${sessionId}/resume`, { method: 'POST' })

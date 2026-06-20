@@ -142,6 +142,29 @@ public sealed class SessionRunnerService
         }
     }
 
+    public async Task PreviewClickAsync(
+        string profileId,
+        double xRatio,
+        double yRatio,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await IsWorkerHealthyAsync(cancellationToken))
+            throw new InvalidOperationException("Worker не запущен.");
+
+        var client = _httpClientFactory.CreateClient("worker-quick");
+        var response = await client.PostAsJsonAsync(
+            $"{GetWorkerBaseUrl()}/internal/preview/{profileId}/click",
+            new { xRatio, yRatio },
+            cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(body) ? "Не удалось отправить клик в браузер." : body);
+        }
+    }
+
     private void ApplySlotSettings(StartSessionRequest request)
     {
         if (request.AdAccountId is null || string.IsNullOrWhiteSpace(request.ProfileId))

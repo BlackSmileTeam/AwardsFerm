@@ -15,6 +15,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
     private readonly ISessionEventReporter _eventReporter;
     private readonly ISessionPauseCoordinator _pauseCoordinator;
     private readonly ISessionPreviewCoordinator _previewCoordinator;
+    private readonly SessionRemoteInputCoordinator _remoteInput;
     private readonly string _profilesRoot;
 
     public BrowserSessionRunner(
@@ -23,6 +24,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
         ISessionEventReporter eventReporter,
         ISessionPauseCoordinator pauseCoordinator,
         ISessionPreviewCoordinator previewCoordinator,
+        SessionRemoteInputCoordinator remoteInput,
         ProfileRepository profileRepository)
     {
         _browserFactory = browserFactory;
@@ -30,6 +32,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
         _eventReporter = eventReporter;
         _pauseCoordinator = pauseCoordinator;
         _previewCoordinator = previewCoordinator;
+        _remoteInput = remoteInput;
         _profilesRoot = profileRepository.ProfilesRoot;
     }
 
@@ -169,6 +172,8 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
 
                 await _cookieStore.LoadAsync(context, sessionProfile.CookiesPath, sessionCt);
                 trafficMonitor = await SessionTrafficMonitor.AttachAsync(context, sessionCt);
+                _remoteInput.Register(profile.Id, () =>
+                    activePage.TryResolve(out var p) ? p : null);
                 _ = StreamScreenshotsAsync(sessionId, profile.Id, activePage, screenshotCts.Token);
                 _ = StreamTrafficAsync(sessionId, () => accumulatedTrafficBytes, () => trafficMonitor, trafficCts.Token);
                 _ = StreamGeoDriftAsync(sessionId, activePage, sessionProfile, geoCts.Token);
@@ -503,6 +508,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
         }
         finally
         {
+            _remoteInput.Clear(profile.Id);
             ipChangeCts.Cancel();
             ipChangeCts.Dispose();
             screenshotCts.Cancel();
