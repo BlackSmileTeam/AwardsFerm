@@ -8,6 +8,7 @@ namespace AwardsFerm.Worker.Services;
 public sealed class SessionExecutionService
 {
     private static readonly TimeSpan StopWaitTimeout = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan StartStopWaitTimeout = TimeSpan.FromSeconds(12);
 
     private readonly IBrowserSessionRunner _runner;
     private readonly IProfileRepository _profileRepository;
@@ -54,7 +55,7 @@ public sealed class SessionExecutionService
         await gate.WaitAsync(cancellationToken);
         try
         {
-            await StopExecutionAsync(request.ProfileId, cancellationToken);
+            await StopExecutionAsync(request.ProfileId, cancellationToken, StartStopWaitTimeout);
 
             if (IsProfileRunning(request.ProfileId))
                 throw new InvalidOperationException($"Профиль {request.ProfileId} уже выполняется.");
@@ -90,8 +91,31 @@ public sealed class SessionExecutionService
         _pauseCoordinator.Clear(profileId);
         _previewCoordinator.Clear(profileId);
         _remoteInput.Clear(profileId);
+
+        if (!_byProfile.TryGetValue(profileId, out var execution))
+            return Task.CompletedTask;
+
+        execution.Cts.Cancel();
+
         var gate = _locks.GetOrAdd(profileId, _ => new SemaphoreSlim(1, 1));
-        return StopWithGateAsync(profileId, gate, cancellationToken);
+        _ = Task.Run(async () =>
+        {
+            await gate.WaitAsync(CancellationToken.None);
+            try
+            {
+                await StopExecutionAsync(profileId, CancellationToken.None, StopWaitTimeout);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Profile {ProfileId}: фоновая остановка завершилась с ошибкой", profileId);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }, CancellationToken.None);
+
+        return Task.CompletedTask;
     }
 
     public void Pause(string profileId)
@@ -133,20 +157,10 @@ public sealed class SessionExecutionService
             yRatio);
     }
 
-    private async Task StopWithGateAsync(string profileId, SemaphoreSlim gate, CancellationToken cancellationToken)
-    {
-        await gate.WaitAsync(cancellationToken);
-        try
-        {
-            await StopExecutionAsync(profileId, cancellationToken);
-        }
-        finally
-        {
-            gate.Release();
-        }
-    }
-
-    private async Task StopExecutionAsync(string profileId, CancellationToken cancellationToken)
+    private async Task StopExecutionAsync(
+        string profileId,
+        CancellationToken cancellationToken,
+        TimeSpan maxWait)
     {
         if (!_byProfile.TryGetValue(profileId, out var execution))
             return;
@@ -160,12 +174,15 @@ public sealed class SessionExecutionService
         execution.Cts.Cancel();
         try
         {
-            await execution.Task.WaitAsync(StopWaitTimeout, cancellationToken);
+            await execution.Task.WaitAsync(maxWait, cancellationToken);
         }
         catch (TimeoutException)
         {
-            _logger.LogWarning("Profile {ProfileId}: остановка не завершилась за {Seconds} сек",
-                profileId, StopWaitTimeout.TotalSeconds);
+            _logger.LogWarning(
+                "Profile {ProfileId}: остановка не завершилась за {Seconds} сек — продолжаем без ожидания",
+                profileId,
+                (int)maxWait.TotalSeconds);
+            _byProfile.TryRemove(profileId, out _);
         }
         catch (OperationCanceledException)
         {

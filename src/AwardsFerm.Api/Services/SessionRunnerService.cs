@@ -41,8 +41,6 @@ public sealed class SessionRunnerService
                 "dotnet run --project src\\AwardsFerm.Worker\\AwardsFerm.Worker.csproj");
         }
 
-        await EnsureWorkerStoppedAsync(profileId);
-
         var sessionId = Guid.NewGuid().ToString("N");
         var workerUrl = GetWorkerBaseUrl();
         var payload = new WorkerRunRequest

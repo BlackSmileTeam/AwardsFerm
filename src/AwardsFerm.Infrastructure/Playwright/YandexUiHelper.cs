@@ -143,6 +143,9 @@ internal static class YandexUiHelper
 
             page = await ReacquireGamePageAsync(context, page, gameUrl, targetUrlPart, cancellationToken);
 
+            if (await TryRecoverLoadFailureAsync(page, sessionId, reporter, stuckTracker, cancellationToken))
+                continue;
+
             if (!page.Url.Contains(targetUrlPart, StringComparison.OrdinalIgnoreCase))
             {
                 await page.GotoAsync(gameUrl, new PageGotoOptions
@@ -352,11 +355,10 @@ internal static class YandexUiHelper
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (await IsGameLoadErrorVisibleAsync(page) &&
-                reporter is not null && sessionId is not null)
+            if (reporter is not null && sessionId is not null &&
+                await TryRecoverLoadFailureAsync(page, sessionId, reporter, stuckTracker, cancellationToken))
             {
-                await SessionScreenDiagnostic.TriggerRestartAsync(
-                    sessionId, page, "Ошибка загрузки игры на экране", reporter, cancellationToken);
+                continue;
             }
 
             if (context is not null)
@@ -445,6 +447,9 @@ internal static class YandexUiHelper
         if (page.IsClosed)
             return false;
 
+        if (await SessionNavigationHelper.IsPageUnavailableAsync(page))
+            return true;
+
         var errorTexts =
             new[]
             {
@@ -484,6 +489,51 @@ internal static class YandexUiHelper
         }
 
         return false;
+    }
+
+    public static async Task<bool> TryRecoverLoadFailureAsync(
+        IPage page,
+        string sessionId,
+        ISessionEventReporter reporter,
+        SessionStuckTracker? stuckTracker,
+        CancellationToken cancellationToken)
+    {
+        if (page.IsClosed)
+            return false;
+
+        var unavailable = await SessionNavigationHelper.IsPageUnavailableAsync(page);
+        var loadError = !unavailable && await IsGameLoadErrorVisibleAsync(page);
+        if (!unavailable && !loadError)
+            return false;
+
+        if (stuckTracker is not null && stuckTracker.Register("page_reload", maxRepeats: 5))
+            return false;
+
+        var message = unavailable
+            ? "Страница недоступна — обновляем…"
+            : "Ошибка загрузки — обновляем страницу…";
+
+        await reporter.ReportAsync(new SessionEvent
+        {
+            SessionId = sessionId,
+            Type = SessionEventType.Log,
+            Message = message
+        }, cancellationToken);
+
+        try
+        {
+            await page.ReloadAsync(new PageReloadOptions
+            {
+                WaitUntil = WaitUntilState.Commit,
+                Timeout = 30_000
+            });
+            await HumanBehavior.DelayAsync(2000, 3500, cancellationToken);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static async Task<bool> IsPlayGuardDialogVisibleAsync(IPage page)

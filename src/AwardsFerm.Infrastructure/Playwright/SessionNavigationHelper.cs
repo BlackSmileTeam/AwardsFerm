@@ -1,3 +1,4 @@
+using AwardsFerm.Infrastructure.Behavior;
 using Microsoft.Playwright;
 
 namespace AwardsFerm.Infrastructure.Playwright;
@@ -118,6 +119,86 @@ internal static class SessionNavigationHelper
 
         return url.StartsWith("chrome-error://", StringComparison.OrdinalIgnoreCase) ||
                url.Contains("chromewebdata", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsPageUnavailableText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var lower = text.ToLowerInvariant();
+        return lower.Contains("временно недоступ", StringComparison.Ordinal) ||
+               lower.Contains("перемещена по новому", StringComparison.Ordinal) ||
+               lower.Contains("перемещён", StringComparison.Ordinal) ||
+               lower.Contains("перемещен", StringComparison.Ordinal) ||
+               lower.Contains("temporarily unavailable", StringComparison.Ordinal) ||
+               lower.Contains("moved permanently", StringComparison.Ordinal);
+    }
+
+    public static async Task<bool> IsPageUnavailableAsync(IPage page)
+    {
+        if (page.IsClosed)
+            return false;
+
+        if (IsBrowserErrorPage(page.Url))
+            return true;
+
+        try
+        {
+            var body = await page.Locator("body").InnerTextAsync();
+            if (IsPageUnavailableText(body))
+                return true;
+        }
+        catch
+        {
+            // ignore
+        }
+
+        foreach (var frame in page.Frames)
+        {
+            try
+            {
+                if (IsBrowserErrorPage(frame.Url))
+                    return true;
+
+                var body = await frame.Locator("body").InnerTextAsync();
+                if (IsPageUnavailableText(body))
+                    return true;
+            }
+            catch
+            {
+                // cross-origin or detached
+            }
+        }
+
+        return false;
+    }
+
+    public static async Task<bool> TryReloadIfUnavailableAsync(
+        IPage page,
+        CancellationToken cancellationToken = default,
+        Func<string, Task>? onProgress = null)
+    {
+        if (page.IsClosed || !await IsPageUnavailableAsync(page))
+            return false;
+
+        if (onProgress is not null)
+            await onProgress("Страница недоступна — обновляем…");
+
+        try
+        {
+            await page.ReloadAsync(new PageReloadOptions
+            {
+                WaitUntil = WaitUntilState.Commit,
+                Timeout = 30_000
+            });
+            await HumanBehavior.DelayAsync(1500, 2500, cancellationToken);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static void EnsureNavigationSucceeded(IPage page, string targetUrl)

@@ -456,12 +456,30 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                 if (await YandexUiHelper.IsGameLoadErrorVisibleAsync(gamePage) ||
                     !await YandexUiHelper.IsGameRunningAsync(gamePage))
                 {
-                    await SessionScreenDiagnostic.TriggerRestartAsync(
-                        sessionId,
-                        gamePage,
-                        "Игра не запустилась — на экране нет игрового canvas",
-                        _eventReporter,
-                        sessionCt);
+                    if (await YandexUiHelper.TryRecoverLoadFailureAsync(
+                            gamePage, sessionId, _eventReporter, stuckTracker, sessionCt))
+                    {
+                        await YandexUiHelper.WaitForGameFullyLoadedAsync(
+                            gamePage,
+                            sessionCt,
+                            context: context,
+                            profile: sessionProfile,
+                            sessionId: sessionId,
+                            reporter: _eventReporter,
+                            landscapeState: landscapeState,
+                            stuckTracker: stuckTracker);
+                    }
+
+                    if (await YandexUiHelper.IsGameLoadErrorVisibleAsync(gamePage) ||
+                        !await YandexUiHelper.IsGameRunningAsync(gamePage))
+                    {
+                        await SessionScreenDiagnostic.TriggerRestartAsync(
+                            sessionId,
+                            gamePage,
+                            "Игра не запустилась — на экране нет игрового canvas",
+                            _eventReporter,
+                            sessionCt);
+                    }
                 }
 
                 await ReportLogAsync(sessionId, "✓ Игра загружена (экран «Загрузка» завершён)", sessionCt);

@@ -96,6 +96,12 @@ internal static class SlitherGamePlayHelper
 
             if (await YandexUiHelper.IsGameLoadErrorVisibleAsync(page))
             {
+                if (await YandexUiHelper.TryRecoverLoadFailureAsync(
+                        page, sessionId, reporter, stuckTracker, cancellationToken))
+                {
+                    continue;
+                }
+
                 await SessionScreenDiagnostic.TriggerRestartAsync(
                     sessionId, page, "Ошибка загрузки игры во время игрового цикла", reporter, cancellationToken);
             }
