@@ -114,7 +114,10 @@ export function SessionsPanel() {
         next = {
           ...next,
           session: next.session ? { ...next.session, publicIp: event.publicIp } : next.session,
-          logs: [...next.logs, `[${formatTime(event.timestamp)}] Текущий IP: ${event.publicIp}`],
+          logs: [
+            ...next.logs,
+            `[${formatTime(event.timestamp)}] ${event.message ?? `Текущий IP: ${event.publicIp}`}`,
+          ],
         }
       }
 

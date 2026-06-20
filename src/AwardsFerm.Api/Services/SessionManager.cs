@@ -217,7 +217,7 @@ public sealed class SessionManager
                     break;
                 case SessionEventType.IpDetected when !string.IsNullOrWhiteSpace(sessionEvent.PublicIp):
                     session.PublicIp = sessionEvent.PublicIp;
-                    session.Logs.Add($"[{sessionEvent.Timestamp:HH:mm:ss}] Текущий IP: {sessionEvent.PublicIp}");
+                    session.Logs.Add($"[{sessionEvent.Timestamp:HH:mm:ss}] {sessionEvent.Message ?? $"Текущий IP: {sessionEvent.PublicIp}"}");
                     SaveIpAudit(session, sessionEvent.PublicIp!);
                     break;
                 case SessionEventType.TrafficUpdated when sessionEvent.TrafficBytes is >= 0:

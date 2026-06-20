@@ -183,7 +183,15 @@ public sealed class SessionExecutionService
                         options,
                         execution.Cts.Token);
 
-                    if (result.AutoRestartAfterGameOvers)
+                    if (result.AutoRestartAfterIpChange)
+                    {
+                        _logger.LogInformation(
+                            "Profile {ProfileId}: IP сменился {OldIp} → {NewIp} — перезапуск сессии",
+                            execution.ProfileId,
+                            result.PreviousIp ?? "?",
+                            result.NewIp ?? "?");
+                    }
+                    else if (result.AutoRestartAfterGameOvers)
                     {
                         _logger.LogInformation(
                             "Profile {ProfileId}: {Games} игр — новая сессия с другим отпечатком и профилем браузера",

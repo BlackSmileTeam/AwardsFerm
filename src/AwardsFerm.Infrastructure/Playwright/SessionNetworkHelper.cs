@@ -39,6 +39,50 @@ internal static class SessionNetworkHelper
         return result.PublicIp;
     }
 
+    /// <summary>Проверка IP без навигации — не сбивает страницу игры.</summary>
+    public static async Task<string?> GetPublicIpInPlaceAsync(IPage page, CancellationToken cancellationToken = default)
+    {
+        foreach (var url in IpCheckUrls)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var ip = await page.EvaluateAsync<string?>(
+                    """
+                    async (url) => {
+                        try {
+                            const response = await fetch(url, { cache: 'no-store' });
+                            const text = (await response.text()).trim();
+                            if (!text) return null;
+                            if (text.startsWith('{')) {
+                                const json = JSON.parse(text);
+                                return json.ip || null;
+                            }
+                            const line = text.split(/\s+/)[0];
+                            return line || null;
+                        } catch {
+                            return null;
+                        }
+                    }
+                    """,
+                    url);
+
+                if (!string.IsNullOrWhiteSpace(ip) && System.Net.IPAddress.TryParse(ip, out _))
+                    return ip;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                // try next url
+            }
+        }
+
+        return null;
+    }
+
     public static async Task<ProxyConnectivityResult> CheckProxyConnectivityAsync(
         IPage page,
         CancellationToken cancellationToken = default)
