@@ -31,10 +31,10 @@ internal static class DeviceFingerprintRotator
 
     private static readonly (string Model, string Android, int W, int H, double Dpr)[] TabletModels =
     [
-        ("SM-X910", "14", 1024, 1366, 2),
-        ("Lenovo TB-J606F", "13", 800, 1280, 1.5),
-        ("SM-T970", "13", 768, 1024, 2),
-        ("21051182G", "12", 820, 1180, 1.5)
+        ("SM-X910", "14", 1366, 1024, 2),
+        ("Lenovo TB-J606F", "13", 1280, 800, 1.5),
+        ("SM-T970", "13", 1024, 768, 2),
+        ("21051182G", "12", 1180, 820, 1.5)
     ];
 
     private static readonly (string Vendor, string Renderer)[] MobileGpus =

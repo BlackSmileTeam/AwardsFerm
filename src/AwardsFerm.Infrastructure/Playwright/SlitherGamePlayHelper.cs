@@ -62,7 +62,8 @@ internal static class SlitherGamePlayHelper
         string sessionId,
         ISessionEventReporter reporter,
         ISessionPauseCoordinator pauseCoordinator,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        DesktopProfile? deviceProfile = null)
     {
         _ = minSeconds;
         _ = maxSeconds;
@@ -88,6 +89,8 @@ internal static class SlitherGamePlayHelper
 
             await page.BringToFrontAsync();
             await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, reporter, cancellationToken);
+            await OrientationHelper.EnsureLandscapeForGameAsync(
+                page, context, deviceProfile, sessionId, reporter, cancellationToken);
 
             if (await IsGameOverVisibleAsync(page))
             {

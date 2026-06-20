@@ -159,6 +159,23 @@ public sealed class SessionsController : ControllerBase
         }
     }
 
+    [HttpPost("profile/{profileId}/preview")]
+    public async Task<IActionResult> SetPreviewByProfile(
+        string profileId,
+        [FromBody] PreviewRequest request,
+        CancellationToken cancellationToken)
+    {
+        var userId = GetUserId();
+        var adAccountId = await _resolver.ResolveAdAccountByProfileAsync(userId, profileId, cancellationToken);
+        if (adAccountId is null)
+            return NotFound();
+        if (!await _resolver.UserOwnsAccountAsync(userId, adAccountId.Value, cancellationToken))
+            return Forbid();
+
+        await _runner.SetPreviewAsync(profileId, request.Enabled, cancellationToken);
+        return NoContent();
+    }
+
     [HttpPost("{sessionId}/pause")]
     public async Task<IActionResult> PauseById(string sessionId, CancellationToken cancellationToken)
     {
@@ -204,4 +221,9 @@ public sealed class SessionsController : ControllerBase
             throw new UnauthorizedAccessException();
         return userId;
     }
+}
+
+public sealed class PreviewRequest
+{
+    public bool Enabled { get; set; }
 }

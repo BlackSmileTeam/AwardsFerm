@@ -123,6 +123,25 @@ public sealed class SessionRunnerService
             _sessionManager.ResumeSession(profileId);
     }
 
+    public async Task SetPreviewAsync(string profileId, bool enabled, CancellationToken cancellationToken = default)
+    {
+        if (!await IsWorkerHealthyAsync(cancellationToken))
+            return;
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient("worker-quick");
+            await client.PostAsJsonAsync(
+                $"{GetWorkerBaseUrl()}/internal/preview/{profileId}",
+                new { enabled },
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Не удалось переключить просмотр для {ProfileId}", profileId);
+        }
+    }
+
     private void ApplySlotSettings(StartSessionRequest request)
     {
         if (request.AdAccountId is null || string.IsNullOrWhiteSpace(request.ProfileId))

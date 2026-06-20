@@ -58,7 +58,7 @@ public sealed class PlaywrightBrowserFactory
             // CDP mobile=true на десктопном Chrome вызывает скачки масштаба; layout задаёт UA + viewport + touch.
             IsMobile = false,
             HasTouch = isMobileLike,
-            SlowMo = 50,
+            SlowMo = isLinux ? 0 : 50,
             Args = BuildChromeArgs(profile, windowPosition, isLinux),
             Timeout = 120_000,
             ExtraHTTPHeaders = new Dictionary<string, string>

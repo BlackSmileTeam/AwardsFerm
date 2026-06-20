@@ -197,6 +197,17 @@ export async function resumeSessionByProfile(profileId: string): Promise<void> {
   }
 }
 
+export async function setPreviewByProfile(profileId: string, enabled: boolean): Promise<void> {
+  const res = await apiFetch(`/api/sessions/profile/${encodeURIComponent(profileId)}/preview`, {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Не удалось переключить просмотр')
+  }
+}
+
 /** @deprecated используйте resumeSessionByProfile */
 export async function resumeSession(sessionId: string): Promise<void> {
   const res = await apiFetch(`/api/sessions/${sessionId}/resume`, { method: 'POST' })

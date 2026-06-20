@@ -14,6 +14,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
     private readonly ICookieStore _cookieStore;
     private readonly ISessionEventReporter _eventReporter;
     private readonly ISessionPauseCoordinator _pauseCoordinator;
+    private readonly ISessionPreviewCoordinator _previewCoordinator;
     private readonly string _profilesRoot;
 
     public BrowserSessionRunner(
@@ -21,12 +22,14 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
         ICookieStore cookieStore,
         ISessionEventReporter eventReporter,
         ISessionPauseCoordinator pauseCoordinator,
+        ISessionPreviewCoordinator previewCoordinator,
         ProfileRepository profileRepository)
     {
         _browserFactory = browserFactory;
         _cookieStore = cookieStore;
         _eventReporter = eventReporter;
         _pauseCoordinator = pauseCoordinator;
+        _previewCoordinator = previewCoordinator;
         _profilesRoot = profileRepository.ProfilesRoot;
     }
 
@@ -159,7 +162,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
 
                 await _cookieStore.LoadAsync(context, sessionProfile.CookiesPath, cancellationToken);
                 trafficMonitor = await SessionTrafficMonitor.AttachAsync(context, cancellationToken);
-                _ = StreamScreenshotsAsync(sessionId, activePage, screenshotCts.Token);
+                _ = StreamScreenshotsAsync(sessionId, profile.Id, activePage, screenshotCts.Token);
                 _ = StreamTrafficAsync(sessionId, () => accumulatedTrafficBytes, () => trafficMonitor, trafficCts.Token);
                 _ = StreamGeoDriftAsync(sessionId, activePage, sessionProfile, geoCts.Token);
 
@@ -175,10 +178,18 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
             await RunStepAsync(sessionId, profile.Id, 1, "Прогрев: открытие yandex.ru", cancellationToken, async () =>
             {
                 page = activePage!.Resolve();
-                await SessionNavigationHelper.GotoWithRetryAsync(page, "https://yandex.ru/", cancellationToken);
+                await ReportLogAsync(sessionId, "Открываем yandex.ru…", cancellationToken);
+                await SessionNavigationHelper.GotoWithRetryAsync(
+                    page,
+                    "https://yandex.ru/",
+                    cancellationToken,
+                    onProgress: msg => ReportLogAsync(sessionId, msg, cancellationToken));
+                await ReportLogAsync(sessionId, "yandex.ru открыт", cancellationToken);
                 await HumanBehavior.DelayAsync(3000, 5000, cancellationToken);
+                await ReportLogAsync(sessionId, "Закрываем всплывающие окна…", cancellationToken);
                 await YandexUiHelper.DismissPopupsAsync(page, cancellationToken);
                 await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, _eventReporter, cancellationToken);
+                await ReportLogAsync(sessionId, "Прокрутка страницы…", cancellationToken);
                 await HumanBehavior.ScrollNaturallyAsync(page, cancellationToken);
                 await HumanBehavior.DelayAsync(2000, 4000, cancellationToken);
             });
@@ -334,10 +345,15 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                     options.TargetGameUrlPart,
                     sessionId,
                     _eventReporter,
-                    cancellationToken);
+                    cancellationToken,
+                    sessionProfile);
 
                 activePage!.Page = gamePage;
-                await YandexUiHelper.WaitForGameFullyLoadedAsync(gamePage, cancellationToken);
+                await YandexUiHelper.WaitForGameFullyLoadedAsync(
+                    gamePage, cancellationToken, context: context, profile: sessionProfile,
+                    sessionId: sessionId, reporter: _eventReporter);
+                await OrientationHelper.EnsureLandscapeForGameAsync(
+                    gamePage, context, sessionProfile, sessionId, _eventReporter, cancellationToken);
                 await ReportLogAsync(sessionId, "✓ Игра загружена (экран «Загрузка» завершён)", cancellationToken);
             });
 
@@ -350,7 +366,11 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
             {
                 page = activePage!.Resolve();
 
-                await YandexUiHelper.WaitForGameFullyLoadedAsync(page, cancellationToken);
+                await YandexUiHelper.WaitForGameFullyLoadedAsync(
+                    page, cancellationToken, context: context, profile: sessionProfile,
+                    sessionId: sessionId, reporter: _eventReporter);
+                await OrientationHelper.EnsureLandscapeForGameAsync(
+                    page, context, sessionProfile, sessionId, _eventReporter, cancellationToken);
 
                 playGameOverCount = 0;
                 var playOutcome = await SlitherGamePlayHelper.PlaySessionAsync(
@@ -362,7 +382,8 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                     sessionId,
                     _eventReporter,
                     _pauseCoordinator,
-                    cancellationToken);
+                    cancellationToken,
+                    sessionProfile);
                 playGameOverCount = playOutcome.GamesPlayed;
 
                 if (playOutcome.RotateSession)
@@ -539,16 +560,26 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
             throw new OperationCanceledException();
     }
 
-    private async Task StreamScreenshotsAsync(string sessionId, ActivePageHolder activePage, CancellationToken cancellationToken)
+    private async Task StreamScreenshotsAsync(
+        string sessionId,
+        string profileId,
+        ActivePageHolder activePage,
+        CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
+                if (!_previewCoordinator.IsEnabled(profileId))
+                {
+                    await Task.Delay(500, cancellationToken);
+                    continue;
+                }
+
                 if (activePage.TryResolve(out var page) && page is not null)
                     await CaptureScreenshotAsync(sessionId, page, cancellationToken);
 
-                await Task.Delay(800, cancellationToken);
+                await Task.Delay(1200, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -588,8 +619,10 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
         var bytes = await page.ScreenshotAsync(new PageScreenshotOptions
         {
             Type = ScreenshotType.Jpeg,
-            Quality = 70,
-            FullPage = false
+            Quality = 60,
+            FullPage = false,
+            Timeout = 8_000,
+            Animations = ScreenshotAnimations.Disabled
         });
 
         await _eventReporter.ReportAsync(new SessionEvent

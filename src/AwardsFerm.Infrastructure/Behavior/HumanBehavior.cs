@@ -37,7 +37,17 @@ public static class HumanBehavior
         var scrolls = Random.Next(2, 5);
         for (var i = 0; i < scrolls; i++)
         {
-            await page.Mouse.WheelAsync(0, Random.Next(150, 450));
+            var delta = Random.Next(150, 450);
+            if (OperatingSystem.IsLinux())
+            {
+                // Mouse.Wheel на Xvfb без реального курсора часто зависает.
+                await page.EvaluateAsync($"window.scrollBy(0, {delta})");
+            }
+            else
+            {
+                await page.Mouse.WheelAsync(0, delta);
+            }
+
             await DelayAsync(600, 1800, cancellationToken);
         }
     }
@@ -46,6 +56,12 @@ public static class HumanBehavior
     {
         await locator.ScrollIntoViewIfNeededAsync();
         await DelayAsync(300, 800, cancellationToken);
+
+        if (OperatingSystem.IsLinux())
+        {
+            await locator.ClickAsync(new LocatorClickOptions { Timeout = 10_000 });
+            return;
+        }
 
         var box = await locator.BoundingBoxAsync();
         if (box is null)
@@ -63,6 +79,12 @@ public static class HumanBehavior
 
     public static async Task MoveMouseRandomlyAsync(IPage page, CancellationToken cancellationToken = default)
     {
+        if (OperatingSystem.IsLinux())
+        {
+            await ScrollNaturallyAsync(page, cancellationToken);
+            return;
+        }
+
         var vp = page.ViewportSize;
         var width = Math.Max(vp?.Width ?? 1920, 320);
         var height = Math.Max(vp?.Height ?? 1080, 240);

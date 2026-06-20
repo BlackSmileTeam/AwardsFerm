@@ -13,6 +13,7 @@ import {
   isHubConnected,
   pauseSessionByProfile,
   resumeSessionByProfile,
+  setPreviewByProfile,
   startSession,
   stopSessionByProfile,
   updateSlot,
@@ -276,6 +277,7 @@ export function SessionsPanel() {
 
   const onPreviewChange = useCallback((profileId: string, open: boolean) => {
     previewOpenRef.current[profileId] = open
+    void setPreviewByProfile(profileId, open).catch(() => {})
     if (!open) {
       setSlots((prev) => ({
         ...prev,

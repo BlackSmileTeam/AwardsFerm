@@ -18,24 +18,28 @@ internal static class SessionNavigationHelper
         string url,
         CancellationToken cancellationToken = default,
         int attempts = 3,
-        int timeoutMs = 90_000)
+        int timeoutMs = 60_000,
+        Func<string, Task>? onProgress = null)
     {
         Exception? last = null;
         for (var i = 0; i < attempts; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (onProgress is not null)
+                await onProgress($"Переход: {url} (попытка {i + 1}/{attempts})");
+
             try
             {
-                await page.GotoAsync(url, new PageGotoOptions
-                {
-                    WaitUntil = WaitUntilState.DOMContentLoaded,
-                    Timeout = timeoutMs
-                });
+                await GotoResilientAsync(page, url, timeoutMs);
+                if (onProgress is not null)
+                    await onProgress($"Страница загружена: {page.Url}");
                 return;
             }
             catch (Exception ex) when (IsRetryableNavigationError(ex) && i < attempts - 1)
             {
                 last = ex;
+                if (onProgress is not null)
+                    await onProgress($"Ошибка перехода, повтор: {TrimNavigationError(ex)}");
                 await Task.Delay(2000 + i * 1500, cancellationToken);
             }
         }
@@ -43,11 +47,38 @@ internal static class SessionNavigationHelper
         if (last is not null)
             throw last;
 
+        await GotoResilientAsync(page, url, timeoutMs);
+    }
+
+    /// <summary>
+    /// Commit не ждёт бесконечных скриптов Яндекса; DOMContentLoaded — best-effort.
+    /// </summary>
+    private static async Task GotoResilientAsync(IPage page, string url, int timeoutMs)
+    {
         await page.GotoAsync(url, new PageGotoOptions
         {
-            WaitUntil = WaitUntilState.DOMContentLoaded,
+            WaitUntil = WaitUntilState.Commit,
             Timeout = timeoutMs
         });
+
+        try
+        {
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded, new PageWaitForLoadStateOptions
+            {
+                Timeout = Math.Min(20_000, timeoutMs / 2)
+            });
+        }
+        catch (TimeoutException)
+        {
+            // Тяжёлые страницы (yandex.ru) часто не отдают DOMContentLoaded — продолжаем после Commit.
+        }
+    }
+
+    private static string TrimNavigationError(Exception ex)
+    {
+        var msg = ex.Message;
+        var idx = msg.IndexOf('\n', StringComparison.Ordinal);
+        return idx > 0 ? msg[..idx] : msg;
     }
 
     public static async Task<bool> TryWaitForSearchResultsAsync(

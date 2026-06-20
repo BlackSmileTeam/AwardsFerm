@@ -11,6 +11,7 @@ public sealed class SessionExecutionService
     private readonly IBrowserSessionRunner _runner;
     private readonly IProfileRepository _profileRepository;
     private readonly ISessionPauseCoordinator _pauseCoordinator;
+    private readonly ISessionPreviewCoordinator _previewCoordinator;
     private readonly ILogger<SessionExecutionService> _logger;
     private readonly ConcurrentDictionary<string, ProfileExecution> _byProfile = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
@@ -19,11 +20,13 @@ public sealed class SessionExecutionService
         IBrowserSessionRunner runner,
         IProfileRepository profileRepository,
         ISessionPauseCoordinator pauseCoordinator,
+        ISessionPreviewCoordinator previewCoordinator,
         ILogger<SessionExecutionService> logger)
     {
         _runner = runner;
         _profileRepository = profileRepository;
         _pauseCoordinator = pauseCoordinator;
+        _previewCoordinator = previewCoordinator;
         _logger = logger;
     }
 
@@ -64,6 +67,7 @@ public sealed class SessionExecutionService
             execution.Task = Task.Run(() => RunProfileLoopAsync(execution, request.Options), cts.Token);
             _byProfile[request.ProfileId] = execution;
             _pauseCoordinator.Clear(request.ProfileId);
+            _previewCoordinator.Clear(request.ProfileId);
 
             _logger.LogInformation(
                 "Profile {ProfileId}: принят запуск (session {SessionId})",
@@ -79,6 +83,7 @@ public sealed class SessionExecutionService
     public Task StopAsync(string profileId, CancellationToken cancellationToken = default)
     {
         _pauseCoordinator.Clear(profileId);
+        _previewCoordinator.Clear(profileId);
         var gate = _locks.GetOrAdd(profileId, _ => new SemaphoreSlim(1, 1));
         return StopWithGateAsync(profileId, gate, cancellationToken);
     }
@@ -93,6 +98,12 @@ public sealed class SessionExecutionService
     {
         _pauseCoordinator.Resume(profileId);
         _logger.LogInformation("Profile {ProfileId}: продолжение", profileId);
+    }
+
+    public void SetPreview(string profileId, bool enabled)
+    {
+        _previewCoordinator.SetEnabled(profileId, enabled);
+        _logger.LogInformation("Profile {ProfileId}: просмотр {State}", profileId, enabled ? "вкл" : "выкл");
     }
 
     private async Task StopWithGateAsync(string profileId, SemaphoreSlim gate, CancellationToken cancellationToken)

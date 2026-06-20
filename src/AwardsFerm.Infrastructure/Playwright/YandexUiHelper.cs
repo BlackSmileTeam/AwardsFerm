@@ -121,11 +121,14 @@ internal static class YandexUiHelper
         string targetUrlPart,
         string sessionId,
         ISessionEventReporter reporter,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        DesktopProfile? profile = null)
     {
         page = await ReacquireGamePageAsync(context, page, gameUrl, targetUrlPart, cancellationToken);
         await FocusGameTabAsync(context, page, cancellationToken);
         await page.BringToFrontAsync();
+        await OrientationHelper.EnsureLandscapeForGameAsync(
+            page, context, profile, sessionId, reporter, cancellationToken);
 
         if (await IsGameRunningAsync(page))
             return page;
@@ -151,6 +154,8 @@ internal static class YandexUiHelper
             await FocusGameTabAsync(context, page, cancellationToken);
             await DismissPopupsAsync(page, cancellationToken);
             await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, reporter, cancellationToken);
+            await OrientationHelper.EnsureLandscapeForGameAsync(
+                page, context, profile, sessionId, reporter, cancellationToken);
 
             if (await IsGameRunningAsync(page))
                 return page;
@@ -317,7 +322,11 @@ internal static class YandexUiHelper
     public static async Task WaitForGameFullyLoadedAsync(
         IPage page,
         CancellationToken cancellationToken = default,
-        int maxWaitSeconds = 120)
+        int maxWaitSeconds = 120,
+        IBrowserContext? context = null,
+        DesktopProfile? profile = null,
+        string? sessionId = null,
+        ISessionEventReporter? reporter = null)
     {
         if (page.IsClosed)
             throw new InvalidOperationException("Страница игры закрыта.");
@@ -328,6 +337,12 @@ internal static class YandexUiHelper
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (context is not null)
+            {
+                await OrientationHelper.EnsureLandscapeForGameAsync(
+                    page, context, profile, sessionId, reporter, cancellationToken);
+            }
 
             if (await IsFullscreenAdVisibleAsync(page))
             {

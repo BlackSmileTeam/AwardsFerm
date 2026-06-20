@@ -17,6 +17,7 @@ public static class DependencyInjection
         services.AddSingleton<ICookieStore, CookieStore>();
         services.AddSingleton<PlaywrightBrowserFactory>();
         services.AddSingleton<ISessionPauseCoordinator, SessionPauseCoordinator>();
+        services.AddSingleton<ISessionPreviewCoordinator, SessionPreviewCoordinator>();
         services.AddSingleton<IBrowserSessionRunner, BrowserSessionRunner>();
         return services;
     }

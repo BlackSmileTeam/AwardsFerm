@@ -69,6 +69,12 @@ app.MapPost("/internal/resume/{profileId}", (string profileId, SessionExecutionS
     return Results.NoContent();
 });
 
+app.MapPost("/internal/preview/{profileId}", (string profileId, PreviewRequest request, SessionExecutionService executor) =>
+{
+    executor.SetPreview(profileId, request.Enabled);
+    return Results.NoContent();
+});
+
 app.MapPost("/internal/stop", async (SessionExecutionService executor, CancellationToken cancellationToken) =>
 {
     foreach (var profileId in new[] { "session-001", "session-002", "session-003" })
@@ -78,8 +84,6 @@ app.MapPost("/internal/stop", async (SessionExecutionService executor, Cancellat
 });
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
-
-app.Run();
 
 static string FindProfilesRoot()
 {
@@ -93,4 +97,11 @@ static string FindProfilesRoot()
     }
 
     return Path.Combine(Directory.GetCurrentDirectory(), "profiles");
+}
+
+app.Run();
+
+public sealed class PreviewRequest
+{
+    public bool Enabled { get; set; }
 }
