@@ -153,6 +153,21 @@
   color: #f28b82;
 }
 
+.badge-clickable {
+  cursor: pointer;
+  font: inherit;
+  appearance: none;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.badge-clickable:hover {
+  background: #2a1f1f;
+}
+
+.badge-error-active {
+  box-shadow: 0 0 0 2px rgba(242, 139, 130, 0.4);
+}
+
 .toolbar {
   display: flex;
   align-items: center;
@@ -337,6 +352,30 @@
   min-width: 0;
   align-self: start;
   width: 100%;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.session-panel-error-highlight {
+  border-color: #d93025;
+  box-shadow:
+    0 0 0 2px rgba(217, 48, 37, 0.5),
+    0 4px 24px rgba(217, 48, 37, 0.2);
+  animation: session-error-pulse 1.2s ease-in-out 3;
+}
+
+@keyframes session-error-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px rgba(217, 48, 37, 0.5),
+      0 4px 24px rgba(217, 48, 37, 0.2);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 4px rgba(217, 48, 37, 0.65),
+      0 4px 28px rgba(217, 48, 37, 0.35);
+  }
 }
 
 .session-panel-header {

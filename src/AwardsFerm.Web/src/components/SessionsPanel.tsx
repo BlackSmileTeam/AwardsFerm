@@ -30,7 +30,7 @@ import {
   type SessionStatus,
   type SlotState,
 } from '../types'
-import { isCaptchaPending, normalizeStatus, statusCssClass, usePinnedScroll } from '../utils/session'
+import { isCaptchaPending, hasActiveSessionError, normalizeStatus, statusCssClass, usePinnedScroll } from '../utils/session'
 import { ServicesIndicator } from './ServicesIndicator'
 
 const statusLabels: Record<SessionStatus, string> = {
@@ -59,6 +59,9 @@ export function SessionsPanel() {
   const [apiUp, setApiUp] = useState(false)
   const [signalRUp, setSignalRUp] = useState(false)
   const [proxies, setProxies] = useState<ProxyConfig[]>([])
+  const [errorHighlightOn, setErrorHighlightOn] = useState(false)
+
+  const sessionCardRefs = useRef<Record<string, HTMLElement | null>>({})
 
   const sessionIdToProfile = useRef<Record<string, string>>({})
   const confirmResolverRef = useRef<((value: boolean) => void) | null>(null)
@@ -489,31 +492,61 @@ export function SessionsPanel() {
     [slots, slotConfigs],
   )
 
-  const hasActiveSessionErrors = useMemo(
+  const errorProfileIds = useMemo(
     () =>
-      slotConfigs.some((cfg) => {
-        const st = slots[cfg.profileId]
-        const status = normalizeStatus(st?.session?.status)
-        const isActive = status === 'Starting' || status === 'Running' || status === 'Paused'
-        if (!isActive) return false
-        if (st?.session?.errorMessage) return true
-        const logs = st?.logs.length ? st.logs : st?.session?.logs ?? []
-        return logs.some(
-          (l) =>
-            (/✗|ошибка:|ERR_|сбой|failed|не удалось/i.test(l) &&
-              !/будет перезапуск|перезапуск…|перезапущен/i.test(l)) ||
-            (/⚠/.test(l) && /диагностик/i.test(l)),
-        )
-      }),
+      slotConfigs
+        .filter((cfg) => {
+          const st = slots[cfg.profileId]
+          const logs = st?.logs.length ? st.logs : st?.session?.logs ?? []
+          return hasActiveSessionError(st?.session?.status, logs, st?.session?.errorMessage)
+        })
+        .map((cfg) => cfg.profileId),
     [slotConfigs, slots],
   )
+
+  const hasActiveSessionErrors = errorProfileIds.length > 0
+
+  useEffect(() => {
+    if (!hasActiveSessionErrors) setErrorHighlightOn(false)
+  }, [hasActiveSessionErrors])
+
+  const toggleErrorHighlight = () => {
+    if (!hasActiveSessionErrors) return
+    setErrorHighlightOn((prev) => {
+      const next = !prev
+      if (next) {
+        window.requestAnimationFrame(() => {
+          sessionCardRefs.current[errorProfileIds[0]]?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'nearest',
+          })
+        })
+      }
+      return next
+    })
+  }
 
   return (
     <>
       <div className="sessions-toolbar-meta">
-        <span className={`badge${hasActiveSessionErrors ? ' badge-error' : ''}`}>
-          Активно: {activeCount}/{slotConfigs.length}
-        </span>
+        {hasActiveSessionErrors ? (
+          <button
+            type="button"
+            className={`badge badge-error badge-clickable${errorHighlightOn ? ' badge-error-active' : ''}`}
+            onClick={toggleErrorHighlight}
+            title={
+              errorHighlightOn
+                ? 'Скрыть подсветку сессий с ошибками'
+                : 'Показать сессии с ошибками'
+            }
+          >
+            Активно: {activeCount}/{slotConfigs.length}
+          </button>
+        ) : (
+          <span className="badge">
+            Активно: {activeCount}/{slotConfigs.length}
+          </span>
+        )}
         <ServicesIndicator apiUp={apiUp} signalRUp={signalRUp} />
       </div>
 
@@ -561,6 +594,10 @@ export function SessionsPanel() {
               proxies={proxies}
               state={slots[slot.profileId] ?? createEmptySlotState()}
               canDelete={slotConfigs.length > 1}
+              highlightError={errorHighlightOn && errorProfileIds.includes(slot.profileId)}
+              panelRef={(el) => {
+                sessionCardRefs.current[slot.profileId] = el
+              }}
               onStart={() => void onStart(slot.profileId)}
               onStop={() => void onStop(slot.profileId)}
               onPause={() => void onPause(slot.profileId)}
@@ -599,6 +636,8 @@ function SessionCard({
   proxies,
   state,
   canDelete,
+  highlightError = false,
+  panelRef,
   onStart,
   onStop,
   onPause,
@@ -612,6 +651,8 @@ function SessionCard({
   proxies: ProxyConfig[]
   state: SlotState
   canDelete: boolean
+  highlightError?: boolean
+  panelRef?: (el: HTMLElement | null) => void
   onStart: () => void
   onStop: () => void
   onPause: () => void
@@ -825,7 +866,10 @@ function SessionCard({
   }
 
   return (
-    <section className="session-panel">
+    <section
+      ref={panelRef}
+      className={`session-panel${highlightError ? ' session-panel-error-highlight' : ''}`}
+    >
       <div className="session-panel-header">
         <div>
           <h2>{config.label}</h2>

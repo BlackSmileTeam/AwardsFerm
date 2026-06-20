@@ -122,6 +122,28 @@ export function isCaptchaPending(logs: string[], currentStep?: number): boolean 
   return true
 }
 
+const SESSION_ERROR_LOG_RE =
+  /✗|ошибка:|ERR_|сбой|failed|не удалось/i
+const SESSION_ERROR_IGNORE_RE = /будет перезапуск|перезапуск…|перезапущен/i
+
+/** Активная сессия с ошибкой в логе или errorMessage. */
+export function hasActiveSessionError(
+  status: unknown,
+  logs: string[],
+  errorMessage?: string | null,
+): boolean {
+  const normalized = normalizeStatus(status)
+  const isActive =
+    normalized === 'Starting' || normalized === 'Running' || normalized === 'Paused'
+  if (!isActive) return false
+  if (errorMessage) return true
+  return logs.some(
+    (l) =>
+      (SESSION_ERROR_LOG_RE.test(l) && !SESSION_ERROR_IGNORE_RE.test(l)) ||
+      (/⚠/.test(l) && /диагностик/i.test(l)),
+  )
+}
+
 /** Автопрокрутка вниз только если пользователь у низа и не выделяет текст. */
 export function usePinnedScroll(
   ref: RefObject<HTMLElement | null>,
