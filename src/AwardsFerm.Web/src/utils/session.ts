@@ -1,3 +1,4 @@
+import { useEffect, useRef, type RefObject } from 'react'
 import type { SessionEventType, SessionInfo, SessionStatus } from '../types'
 
 const STATUS_BY_NUMBER: Record<number, SessionStatus> = {
@@ -119,4 +120,40 @@ export function isCaptchaPending(logs: string[], currentStep?: number): boolean 
   if (currentStep != null && currentStep > 1) return false
 
   return true
+}
+
+/** Автопрокрутка вниз только если пользователь у низа и не выделяет текст. */
+export function usePinnedScroll(
+  ref: RefObject<HTMLElement | null>,
+  contentKey: number,
+) {
+  const pinnedRef = useRef(true)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+
+    const updatePinned = () => {
+      const selection = window.getSelection()
+      if (selection && !selection.isCollapsed && el.contains(selection.anchorNode)) {
+        pinnedRef.current = false
+        return
+      }
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+      pinnedRef.current = dist < 48
+    }
+
+    el.addEventListener('scroll', updatePinned, { passive: true })
+    document.addEventListener('selectionchange', updatePinned)
+    return () => {
+      el.removeEventListener('scroll', updatePinned)
+      document.removeEventListener('selectionchange', updatePinned)
+    }
+  }, [ref])
+
+  useEffect(() => {
+    if (!pinnedRef.current) return
+    const el = ref.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [ref, contentKey])
 }

@@ -30,7 +30,7 @@ import {
   type SessionStatus,
   type SlotState,
 } from '../types'
-import { isCaptchaPending, normalizeStatus, statusCssClass } from '../utils/session'
+import { isCaptchaPending, normalizeStatus, statusCssClass, usePinnedScroll } from '../utils/session'
 import { ServicesIndicator } from './ServicesIndicator'
 
 const statusLabels: Record<SessionStatus, string> = {
@@ -489,10 +489,29 @@ export function SessionsPanel() {
     [slots, slotConfigs],
   )
 
+  const hasActiveSessionErrors = useMemo(
+    () =>
+      slotConfigs.some((cfg) => {
+        const st = slots[cfg.profileId]
+        const status = normalizeStatus(st?.session?.status)
+        const isActive = status === 'Starting' || status === 'Running' || status === 'Paused'
+        if (!isActive) return false
+        if (st?.session?.errorMessage) return true
+        const logs = st?.logs.length ? st.logs : st?.session?.logs ?? []
+        return logs.some(
+          (l) =>
+            (/✗|ошибка:|ERR_|сбой|failed|не удалось/i.test(l) &&
+              !/будет перезапуск|перезапуск…|перезапущен/i.test(l)) ||
+            (/⚠/.test(l) && /диагностик/i.test(l)),
+        )
+      }),
+    [slotConfigs, slots],
+  )
+
   return (
     <>
       <div className="sessions-toolbar-meta">
-        <span className="badge">
+        <span className={`badge${hasActiveSessionErrors ? ' badge-error' : ''}`}>
           Активно: {activeCount}/{slotConfigs.length}
         </span>
         <ServicesIndicator apiUp={apiUp} signalRUp={signalRUp} />
@@ -606,9 +625,12 @@ function SessionCard({
 }) {
   const logViewRef = useRef<HTMLDivElement>(null)
   const diagnosticViewRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const screenshotRef = useRef<HTMLImageElement>(null)
   const [copied, setCopied] = useState(false)
   const [diagnosticCopied, setDiagnosticCopied] = useState(false)
+  const [diagnosticExpanded, setDiagnosticExpanded] = useState(true)
+  const [menuOpen, setMenuOpen] = useState(false)
   const [clickPending, setClickPending] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewFullscreen, setPreviewFullscreen] = useState(false)
@@ -637,6 +659,20 @@ function SessionCard({
     displayLogs,
     state.session?.currentStep,
   )
+
+  usePinnedScroll(logViewRef, displayLogs.length)
+  usePinnedScroll(diagnosticViewRef, diagnosticExpanded ? displayDiagnosticLogs.length : 0)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDocClick = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [menuOpen])
 
   useEffect(() => {
     if (!previewOpen) return
@@ -676,16 +712,6 @@ function SessionCard({
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [previewFullscreen])
-
-  useEffect(() => {
-    const el = logViewRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [displayLogs])
-
-  useEffect(() => {
-    const el = diagnosticViewRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [displayDiagnosticLogs])
 
   useEffect(() => {
     if (!isOccupied && previewOpen) {
@@ -803,7 +829,6 @@ function SessionCard({
       <div className="session-panel-header">
         <div>
           <h2>{config.label}</h2>
-          <span className="profile-id">{config.profileId}</span>
           <div className="profile-ip">IP: {state.session?.publicIp ?? '—'}</div>
           <div className="profile-traffic">
             Трафик: {formatTrafficBytes(state.session?.trafficBytes ?? 0)}
@@ -840,12 +865,25 @@ function SessionCard({
           onChange={(e) => onSlotChange({ scheduledStartMsk: e.target.value })}
         />
         <label className="schedule-label">Остановить (МСК)</label>
-        <input
-          type="time"
-          className="schedule-time"
-          value={config.stopAtMsk ?? ''}
-          onChange={(e) => onSlotChange({ stopAtMsk: e.target.value || null })}
-        />
+        <div className="schedule-time-wrap">
+          <input
+            type="time"
+            className="schedule-time"
+            value={config.stopAtMsk ?? ''}
+            onChange={(e) => onSlotChange({ stopAtMsk: e.target.value || null })}
+          />
+          {config.stopAtMsk ? (
+            <button
+              type="button"
+              className="schedule-time-clear"
+              onClick={() => onSlotChange({ stopAtMsk: null })}
+              title="Сбросить время остановки"
+              aria-label="Сбросить время остановки"
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="schedule-row">
@@ -900,41 +938,63 @@ function SessionCard({
           <button className="btn btn-secondary btn-sm" onClick={onResume} disabled={state.loading}>
             ▶ Продолжить
           </button>
-        ) : (
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={onPause}
-            disabled={state.loading || !isRunning}
-          >
-            ⏸ Пауза
-          </button>
-        )}
+        ) : null}
         <button className="btn btn-danger btn-sm" onClick={onStop} disabled={state.loading || !isOccupied}>
           ■ Стоп
         </button>
-        <button
-          className="btn btn-secondary btn-sm"
-          onClick={onDelete}
-          disabled={!canDelete || state.loading}
-          title={canDelete ? 'Удалить слот' : 'Нельзя удалить последний слот'}
-        >
-          ✕
-        </button>
-        <button
-          type="button"
-          className={`btn btn-preview btn-sm${previewOpen ? ' btn-preview-active' : ''}`}
-          onClick={togglePreview}
-          disabled={!isOccupied}
-          title={isOccupied ? 'Просмотр браузера' : 'Просмотр доступен во время сессии'}
-        >
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-            <path
-              fill="currentColor"
-              d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"
-            />
-          </svg>
-          Просмотр
-        </button>
+        <div className="session-menu" ref={menuRef}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm session-menu-trigger"
+            onClick={() => setMenuOpen((open) => !open)}
+            aria-label="Дополнительные действия"
+            aria-expanded={menuOpen}
+          >
+            ⋯
+          </button>
+          {menuOpen ? (
+            <div className="session-menu-dropdown" role="menu">
+              {!isPaused ? (
+                <button
+                  type="button"
+                  className="session-menu-item"
+                  role="menuitem"
+                  disabled={state.loading || !isRunning}
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onPause()
+                  }}
+                >
+                  ⏸ Пауза
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="session-menu-item"
+                role="menuitem"
+                disabled={!isOccupied}
+                onClick={() => {
+                  setMenuOpen(false)
+                  void togglePreview()
+                }}
+              >
+                Просмотр
+              </button>
+              <button
+                type="button"
+                className="session-menu-item session-menu-item-danger"
+                role="menuitem"
+                disabled={!canDelete || state.loading}
+                onClick={() => {
+                  setMenuOpen(false)
+                  onDelete()
+                }}
+              >
+                Удалить
+              </button>
+            </div>
+          ) : null}
+        </div>
         <span className="step-hint">
           {state.session?.currentStep
             ? `Шаг ${state.session.currentStep}/${state.session.totalSteps}`
@@ -1062,7 +1122,17 @@ function SessionCard({
       {displayDiagnosticLogs.length > 0 && (
         <>
           <div className="log-panel-header diagnostic-log-header">
-            <span className="log-panel-title">Диагностика</span>
+            <button
+              type="button"
+              className="log-panel-toggle"
+              onClick={() => setDiagnosticExpanded((v) => !v)}
+              aria-expanded={diagnosticExpanded}
+            >
+              <span className={`log-panel-chevron${diagnosticExpanded ? ' expanded' : ''}`} aria-hidden="true">
+                ▸
+              </span>
+              <span className="log-panel-title">Диагностика</span>
+            </button>
             <button
               type="button"
               className={`btn-icon${diagnosticCopied ? ' btn-icon-ok' : ''}`}
@@ -1087,13 +1157,15 @@ function SessionCard({
               )}
             </button>
           </div>
-          <div ref={diagnosticViewRef} className="log-view session-log diagnostic-log">
-            {displayDiagnosticLogs.map((entry, i) => (
-              <pre key={i} className="diagnostic-entry">
-                {entry}
-              </pre>
-            ))}
-          </div>
+          {diagnosticExpanded ? (
+            <div ref={diagnosticViewRef} className="log-view session-log diagnostic-log">
+              {displayDiagnosticLogs.map((entry, i) => (
+                <pre key={i} className="diagnostic-entry">
+                  {entry}
+                </pre>
+              ))}
+            </div>
+          ) : null}
         </>
       )}
     </section>
