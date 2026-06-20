@@ -1120,7 +1120,7 @@ function SessionCard({
       </div>
 
       {displayDiagnosticLogs.length > 0 && (
-        <>
+        <div className={`diagnostic-section${diagnosticExpanded ? '' : ' is-collapsed'}`}>
           <div className="log-panel-header diagnostic-log-header">
             <button
               type="button"
@@ -1166,7 +1166,7 @@ function SessionCard({
               ))}
             </div>
           ) : null}
-        </>
+        </div>
       )}
     </section>
   )
