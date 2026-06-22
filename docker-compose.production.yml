@@ -44,6 +44,7 @@ services:
       YandexRsya__OAuthToken: ${RSYA_OAUTH_TOKEN:-}
     volumes:
       - awardsferm-data:/var/lib/awardsferm
+      - ./profiles:/app/profiles
     expose:
       - "8080"
     ports:

@@ -196,40 +196,47 @@ public sealed class SessionSlotStore
 
     private void EnsureProfileDirectory(string profileId, string label, int cityIndex)
     {
-        var profileDir = Path.Combine(ProfilesRoot, profileId);
-        Directory.CreateDirectory(profileDir);
-
-        var configPath = Path.Combine(profileDir, "config.json");
-        if (File.Exists(configPath))
-            return;
-
-        var (lat, lon, cityLabel) = cityIndex switch
+        try
         {
-            0 => (60.053085, 30.311729, "Санкт-Петербург, Россия"),
-            1 => (55.7558, 37.6173, "Москва, Россия"),
-            _ => (55.7558, 37.6173, "Москва, Россия")
-        };
+            var profileDir = Path.Combine(ProfilesRoot, profileId);
+            Directory.CreateDirectory(profileDir);
 
-        var profile = new
-        {
-            id = profileId,
-            name = $"Desktop Chrome Win10 — {label}",
-            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            viewportWidth = 1920,
-            viewportHeight = 1080,
-            locale = "ru-RU",
-            timezone = "Europe/Moscow",
-            latitude = lat,
-            longitude = lon,
-            locationLabel = cityLabel,
-            proxyUrl = (string?)null
-        };
+            var configPath = Path.Combine(profileDir, "config.json");
+            if (File.Exists(configPath))
+                return;
 
-        File.WriteAllText(configPath, JsonSerializer.Serialize(profile, new JsonSerializerOptions
+            var (lat, lon, cityLabel) = cityIndex switch
+            {
+                0 => (60.053085, 30.311729, "Санкт-Петербург, Россия"),
+                1 => (55.7558, 37.6173, "Москва, Россия"),
+                _ => (55.7558, 37.6173, "Москва, Россия")
+            };
+
+            var profile = new
+            {
+                id = profileId,
+                name = $"Desktop Chrome Win10 — {label}",
+                userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                viewportWidth = 1920,
+                viewportHeight = 1080,
+                locale = "ru-RU",
+                timezone = "Europe/Moscow",
+                latitude = lat,
+                longitude = lon,
+                locationLabel = cityLabel,
+                proxyUrl = (string?)null
+            };
+
+            File.WriteAllText(configPath, JsonSerializer.Serialize(profile, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                WriteIndented = true
+            }));
+        }
+        catch
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            WriteIndented = true
-        }));
+            // API может работать без локального profiles (каталог создаст Worker при старте сессии).
+        }
     }
 
     private static int ParseSessionNumber(string profileId)
