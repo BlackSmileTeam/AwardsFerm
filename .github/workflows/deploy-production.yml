@@ -30,7 +30,6 @@ jobs:
       - name: Configure SSH
         env:
           PROD_HOST: ${{ secrets.PROD_HOST }}
-          PROD_USER: ${{ secrets.PROD_USER }}
           PROD_PORT: ${{ secrets.PROD_SSH_PORT }}
           PROD_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
         run: |
@@ -38,67 +37,38 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$PROD_KEY" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
-          ssh-keyscan -p "$PROD_PORT" -H "$PROD_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
-          cat >> ~/.ssh/config << EOF
-          Host production
-            HostName ${PROD_HOST}
-            Port ${PROD_PORT}
-            User ${PROD_USER}
-            IdentityFile ~/.ssh/id_deploy
-            IdentitiesOnly yes
-            StrictHostKeyChecking yes
-            ServerAliveInterval 30
-            ServerAliveCountMax 10
-            TCPKeepAlive yes
-            Compression yes
-            ConnectTimeout 30
-          EOF
-          chmod 600 ~/.ssh/config
-
-      - name: Test SSH connection
-        run: |
-          set -euo pipefail
-          for attempt in 1 2 3 4 5; do
-            if ssh production 'echo "SSH OK"'; then
-              exit 0
-            fi
-            echo "SSH attempt ${attempt}/5 failed, waiting 20s..."
-            sleep 20
-          done
-          echo "ERROR: cannot connect to production host"
-          exit 1
-
-      - name: Pack sources
-        run: |
-          set -euo pipefail
-          tar -czf /tmp/af-src.tgz \
-            --exclude='.git' \
-            --exclude='**/bin' \
-            --exclude='**/obj' \
-            --exclude='**/node_modules' \
-            --exclude='profiles/*/browser-data' \
-            --exclude='**/*.db' \
-            --exclude='**/*.db-shm' \
-            --exclude='**/*.db-wal' \
-            .
-          ls -lh /tmp/af-src.tgz
+          ssh-keyscan -p "$PROD_PORT" "$PROD_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Upload sources
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_PORT: ${{ secrets.PROD_SSH_PORT }}
         run: |
           set -euo pipefail
-          for attempt in 1 2 3 4 5; do
-            if scp /tmp/af-src.tgz production:/tmp/af-src.tgz; then
-              ssh production 'ls -lh /tmp/af-src.tgz'
+          SSH_OPTS="-i ~/.ssh/id_deploy -p $PROD_PORT -o StrictHostKeyChecking=yes -o GSSAPIAuthentication=no -o PreferredAuthentications=publickey -o ConnectTimeout=60 -o ServerAliveInterval=30"
+          for attempt in 1 2 3; do
+            if tar -czf - \
+              --exclude='.git' \
+              --exclude='**/bin' \
+              --exclude='**/obj' \
+              --exclude='**/node_modules' \
+              --exclude='profiles/*/browser-data' \
+              . | ssh $SSH_OPTS "$PROD_USER@$PROD_HOST" 'cat > /tmp/af-src.tgz'; then
+              ssh $SSH_OPTS "$PROD_USER@$PROD_HOST" 'ls -lh /tmp/af-src.tgz'
               exit 0
             fi
-            echo "Upload attempt ${attempt}/5 failed, waiting 20s..."
-            sleep 20
+            echo "Upload attempt ${attempt}/3 failed, waiting 30s..."
+            sleep 30
           done
-          echo "ERROR: failed to upload sources after 5 attempts"
+          echo "ERROR: failed to upload sources"
           exit 1
 
       - name: Deploy on server
         env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_PORT: ${{ secrets.PROD_SSH_PORT }}
           PROD_DEPLOY_PATH: ${{ secrets.PROD_DEPLOY_PATH }}
           PROD_FE_PORT: ${{ secrets.PROD_FRONTEND_PORT }}
           PROD_API_PORT: ${{ secrets.PROD_API_PORT }}
@@ -110,7 +80,9 @@ jobs:
           FE_PORT="${PROD_FE_PORT:-55504}"
           API_PORT="${PROD_API_PORT:-55503}"
 
-          ssh production \
+          ssh -i ~/.ssh/id_deploy -p "$PROD_PORT" -o StrictHostKeyChecking=yes \
+            -o GSSAPIAuthentication=no -o PreferredAuthentications=publickey -o ConnectTimeout=60 \
+            "$PROD_USER@$PROD_HOST" \
             "DEPLOY_PATH='$DEPLOY_PATH' FE_PORT='$FE_PORT' API_PORT='$API_PORT' JWT_SECRET='$JWT_SECRET' RSYA_OAUTH_TOKEN='$RSYA_OAUTH_TOKEN' bash -s" << 'REMOTE'
           set -eo pipefail
 

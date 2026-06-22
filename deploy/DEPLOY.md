@@ -120,22 +120,36 @@ docker compose -f docker-compose.production.yml --env-file .env.production up -d
 
 ## GitHub Actions: SSH / tar ошибки
 
-Если в логе деплоя:
+### `Connection timed out during banner exchange`
 
-- `kex_exchange_identification: read: Connection reset by peer`
-- `tar: Wrote only ... bytes` / exit `141` или `255`
+TCP-порт 22 открыт, но `sshd` не отвечает баннером. Частые причины:
 
-типичные причины:
+1. **fail2ban** заблокировал IP после серии неудачных деплоев — разбан через консоль VPS.
+2. **sshd перегружен** (`MaxStartups`) — много одновременных подключений от CI.
+3. **UseDNS** в `sshd_config` — обратный DNS для IP GitHub Actions зависает.
 
-1. **fail2ban** заблокировал IP GitHub Actions — на сервере: `sudo fail2ban-client status sshd`, при необходимости разбанить IP.
-2. **Перегрузка sshd** (`MaxStartups`) — подождать и перезапустить workflow (Re-run).
-3. **Обрыв pipe** при `tar | ssh` — workflow использует локальный архив + `scp` с 5 повторами.
+**Восстановление через консоль FirstVDS** (без SSH):
 
-Проверка SSH с ПК:
+```bash
+sudo bash /opt/awardsferm/deploy/linux/recover-sshd.sh
+# или вручную:
+sudo fail2ban-client unban --all
+sudo sed -i 's/^#*UseDNS.*/UseDNS no/' /etc/ssh/sshd_config
+echo "UseDNS no" | sudo tee -a /etc/ssh/sshd_config
+sudo systemctl restart ssh
+```
+
+Проверка с ПК:
 
 ```powershell
 ssh -i $env:USERPROFILE\.ssh\bebochka_firstvds_deploy deploy@157.22.199.24 "echo OK"
 ```
+
+Приложение (порты 55503/55504) может работать, пока SSH недоступен.
+
+### `kex_exchange_identification` / `tar` exit 141
+
+Обрыв pipe при `tar | ssh` — workflow делает до 3 повторов с паузой 30 с.
 
 ## Локальная разработка
 
