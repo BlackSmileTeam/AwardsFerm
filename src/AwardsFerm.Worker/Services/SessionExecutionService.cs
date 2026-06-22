@@ -143,11 +143,24 @@ public sealed class SessionExecutionService
         _logger.LogInformation("Profile {ProfileId}: продолжение", profileId);
     }
 
-    public void SetPreview(string profileId, bool enabled)
+    public async Task SetPreviewAsync(string profileId, bool enabled, CancellationToken cancellationToken = default)
     {
         _previewCoordinator.SetEnabled(profileId, enabled);
         if (enabled)
+        {
             _previewCoordinator.RequestImmediateCapture(profileId);
+            try
+            {
+                var frame = await _remoteInput.TryCaptureFrameAsync(profileId, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(frame))
+                    _previewCoordinator.SetLastFrame(profileId, frame);
+            }
+            catch
+            {
+                // streaming loop подхватит кадр
+            }
+        }
+
         _logger.LogInformation("Profile {ProfileId}: просмотр {State}", profileId, enabled ? "вкл" : "выкл");
     }
 

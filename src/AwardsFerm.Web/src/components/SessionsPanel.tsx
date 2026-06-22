@@ -336,10 +336,6 @@ export function SessionsPanel() {
 
   const onPreviewClose = useCallback((profileId: string) => {
     void setPreviewByProfile(profileId, false).catch(() => {})
-    setSlots((prev) => ({
-      ...prev,
-      [profileId]: { ...prev[profileId], screenshotBase64: null },
-    }))
   }, [])
 
   const onStart = async (profileId: string) => {
@@ -824,11 +820,12 @@ function SessionCard({
         if (!cancelled && frame) {
           onScreenshotUpdate(frame)
           setPreviewWaiting(false)
-        } else if (!cancelled && attempts >= 8) {
+          setPreviewLoading(false)
+        } else if (!cancelled && attempts >= 3) {
           setPreviewWaiting(true)
         }
       } catch {
-        if (!cancelled && attempts >= 8) setPreviewWaiting(true)
+        if (!cancelled && attempts >= 3) setPreviewWaiting(true)
       }
     }
 
@@ -875,13 +872,33 @@ function SessionCard({
 
   const openPreview = async () => {
     setPreviewOpen(true)
+
+    if (state.screenshotBase64) {
+      void setPreviewByProfile(config.profileId, true).catch(() => {
+        setPreviewOpen(false)
+      })
+      void fetchPreviewFrame(config.profileId)
+        .then((frame) => {
+          if (frame) onScreenshotUpdate(frame)
+        })
+        .catch(() => {})
+      return
+    }
+
     setPreviewLoading(true)
     try {
+      const cached = await fetchPreviewFrame(config.profileId)
+      if (cached) {
+        onScreenshotUpdate(cached)
+        setPreviewLoading(false)
+      }
+
       await setPreviewByProfile(config.profileId, true)
+
       const frame = await fetchPreviewFrame(config.profileId)
       if (frame) onScreenshotUpdate(frame)
     } catch {
-      setPreviewOpen(false)
+      if (!state.screenshotBase64) setPreviewOpen(false)
     } finally {
       setPreviewLoading(false)
     }
@@ -1370,7 +1387,7 @@ function SessionCard({
               </div>
               {clickError && <div className="preview-click-error">{clickError}</div>}
               <div className={`browser-viewport${clickPending ? ' browser-viewport-clicking' : ''}`}>
-                {previewLoading ? (
+                {previewLoading && !state.screenshotBase64 ? (
                   <span className="screenshot-placeholder">Подключение просмотра…</span>
                 ) : state.screenshotBase64 ? (
                   <img

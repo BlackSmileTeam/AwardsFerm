@@ -69,9 +69,13 @@ app.MapPost("/internal/resume/{profileId}", (string profileId, SessionExecutionS
     return Results.NoContent();
 });
 
-app.MapPost("/internal/preview/{profileId}", (string profileId, PreviewRequest request, SessionExecutionService executor) =>
+app.MapPost("/internal/preview/{profileId}", async (
+    string profileId,
+    PreviewRequest request,
+    SessionExecutionService executor,
+    CancellationToken cancellationToken) =>
 {
-    executor.SetPreview(profileId, request.Enabled);
+    await executor.SetPreviewAsync(profileId, request.Enabled, cancellationToken);
     return Results.NoContent();
 });
 
