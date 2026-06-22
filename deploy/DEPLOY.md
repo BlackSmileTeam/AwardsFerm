@@ -118,6 +118,25 @@ git pull
 docker compose -f docker-compose.production.yml --env-file .env.production up -d --build
 ```
 
+## GitHub Actions: SSH / tar ошибки
+
+Если в логе деплоя:
+
+- `kex_exchange_identification: read: Connection reset by peer`
+- `tar: Wrote only ... bytes` / exit `141` или `255`
+
+типичные причины:
+
+1. **fail2ban** заблокировал IP GitHub Actions — на сервере: `sudo fail2ban-client status sshd`, при необходимости разбанить IP.
+2. **Перегрузка sshd** (`MaxStartups`) — подождать и перезапустить workflow (Re-run).
+3. **Обрыв pipe** при `tar | ssh` — workflow использует локальный архив + `scp` с 5 повторами.
+
+Проверка SSH с ПК:
+
+```powershell
+ssh -i $env:USERPROFILE\.ssh\bebochka_firstvds_deploy deploy@157.22.199.24 "echo OK"
+```
+
 ## Локальная разработка
 
 | ОС | Команда |
