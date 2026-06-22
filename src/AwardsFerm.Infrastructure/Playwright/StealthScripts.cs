@@ -6,6 +6,9 @@ internal static class StealthScripts
 {
     public static string BuildInitScript(DesktopProfile profile)
     {
+        if (profile.UseNativeDevice)
+            return "/* native device — no fingerprint spoofing */";
+
         var vendor = EscapeJs(profile.WebGlVendor);
         var renderer = EscapeJs(profile.WebGlRenderer);
         var platform = EscapeJs(profile.Platform);

@@ -29,6 +29,8 @@ public sealed class DesktopProfile
     public string BrowserSessionId { get; set; } = string.Empty;
     public DeviceFormFactor FormFactor { get; set; } = DeviceFormFactor.Desktop;
     public SessionDevicePlatform DevicePlatform { get; set; } = SessionDevicePlatform.Random;
+    /// <summary>Не подменять fingerprint — использовать реальный браузер на хосте.</summary>
+    public bool UseNativeDevice { get; set; }
     public BrowserEngine BrowserEngine { get; set; } = BrowserEngine.Chromium;
     public int MaxTouchPoints { get; set; }
     /// <summary>Базовая точка для периодического смещения координат.</summary>

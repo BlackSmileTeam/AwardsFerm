@@ -87,6 +87,9 @@ internal static class DeviceFingerprintRotator
         string? explicitProxyUrl = null,
         SessionDevicePlatform devicePlatform = SessionDevicePlatform.Random)
     {
+        if (devicePlatform == SessionDevicePlatform.Native)
+            return CreateNativeProfile(baseProfile, profilesRoot, useProxy, explicitProxyUrl);
+
         var chromeMajor = Random.Next(120, 132);
         var chromeBuild = Random.Next(6100, 6800);
         var resolvedPlatform = ResolvePlatform(devicePlatform);
@@ -142,6 +145,68 @@ internal static class DeviceFingerprintRotator
             Platform = template.OsPlatform,
             DeviceScaleFactor = template.ScaleFactor,
             MaxTouchPoints = template.MaxTouchPoints,
+            SessionDeviceId = Guid.NewGuid().ToString("N"),
+            SessionMac = GenerateMacAddress()
+        };
+    }
+
+    private static DesktopProfile CreateNativeProfile(
+        DesktopProfile baseProfile,
+        string profilesRoot,
+        bool useProxy,
+        string? explicitProxyUrl)
+    {
+        ProxyEntry? proxyEntry = null;
+        if (!string.IsNullOrWhiteSpace(explicitProxyUrl))
+        {
+            proxyEntry = new ProxyEntry
+            {
+                Url = explicitProxyUrl,
+                Geo = ProxyRotator.ResolveGeo(explicitProxyUrl, null)
+            };
+        }
+        else if (useProxy)
+        {
+            proxyEntry = ProxyRotator.PickForProfile(profilesRoot, baseProfile.Id);
+        }
+
+        var proxy = proxyEntry?.Url;
+        var browserSessionId = Guid.NewGuid().ToString("N");
+        if (proxy is not null)
+            proxy = ProxyUrlHelper.ConfigureForProfile(proxy, baseProfile.Id);
+        var geo = proxy is not null
+            ? ProxyRotator.ResolveGeo(proxyEntry!.Url, proxyEntry.Geo).WithJitter(Random)
+            : RussiaGeo.PickForProfile(baseProfile.Id, baseProfile).WithJitter(Random);
+        var profileDir = Path.Combine(profilesRoot, baseProfile.Id);
+
+        return new DesktopProfile
+        {
+            Id = baseProfile.Id,
+            Name = baseProfile.Name,
+            BrowserSessionId = browserSessionId,
+            DevicePlatform = SessionDevicePlatform.Native,
+            UseNativeDevice = true,
+            BrowserEngine = BrowserEngine.Chromium,
+            FormFactor = DeviceFormFactor.Desktop,
+            UserAgent = baseProfile.UserAgent,
+            ViewportWidth = baseProfile.ViewportWidth,
+            ViewportHeight = baseProfile.ViewportHeight,
+            Locale = geo.Locale,
+            Timezone = geo.Timezone,
+            Latitude = geo.Latitude,
+            Longitude = geo.Longitude,
+            GeoAnchorLatitude = geo.Latitude,
+            GeoAnchorLongitude = geo.Longitude,
+            LocationLabel = geo.Label,
+            ProxyUrl = baseProfile.ProxyUrl ?? proxy,
+            CookiesPath = Path.Combine(profileDir, $"cookies-{browserSessionId}.json"),
+            HardwareConcurrency = baseProfile.HardwareConcurrency,
+            DeviceMemory = baseProfile.DeviceMemory,
+            WebGlVendor = baseProfile.WebGlVendor,
+            WebGlRenderer = baseProfile.WebGlRenderer,
+            Platform = baseProfile.Platform,
+            DeviceScaleFactor = 1,
+            MaxTouchPoints = 0,
             SessionDeviceId = Guid.NewGuid().ToString("N"),
             SessionMac = GenerateMacAddress()
         };
@@ -353,8 +418,11 @@ internal static class DeviceFingerprintRotator
                 ? $"прокси: {MaskProxy(profile.ProxyUrl)} (IP уточняется после старта)"
                 : "IP: ваш реальный (для смены — proxies.txt)";
 
-        var deviceLabel = profile.DevicePlatform switch
+        var deviceLabel = profile.UseNativeDevice
+            ? "без эмуляции (текущая машина)"
+            : profile.DevicePlatform switch
         {
+            SessionDevicePlatform.Native => "без эмуляции (текущая машина)",
             SessionDevicePlatform.Desktop => "ПК",
             SessionDevicePlatform.Laptop => "ноутбук",
             SessionDevicePlatform.Tablet => "планшет",
@@ -363,11 +431,17 @@ internal static class DeviceFingerprintRotator
             _ => profile.ViewportWidth >= 1600 ? "ПК" : "ноутбук"
         };
 
-        var browserLabel = profile.BrowserEngine == BrowserEngine.WebKit ? "Safari/WebKit" : "Chrome";
+        var browserLabel = profile.UseNativeDevice
+            ? "Chrome (нативный)"
+            : profile.BrowserEngine == BrowserEngine.WebKit ? "Safari/WebKit" : "Chrome";
+
+        var sizeLabel = profile.UseNativeDevice
+            ? "размер окна хоста"
+            : $"{profile.ViewportWidth}×{profile.ViewportHeight}";
 
         return $"ID: {profile.SessionDeviceId[..8]}…, {ipPart}, " +
                $"локация: {SessionLocationHelper.Format(profile)}, " +
-               $"{deviceLabel}, {browserLabel}, {profile.ViewportWidth}×{profile.ViewportHeight}, " +
+               $"{deviceLabel}, {browserLabel}, {sizeLabel}, " +
                $"{profile.HardwareConcurrency} CPU, {profile.DeviceMemory} GB RAM";
     }
 

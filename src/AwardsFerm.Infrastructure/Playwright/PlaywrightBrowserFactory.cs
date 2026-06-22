@@ -50,8 +50,9 @@ public sealed class PlaywrightBrowserFactory
         Directory.CreateDirectory(userDataDir);
 
         var windowPosition = ResolveWindowPosition(profile.Id);
-        var isMobileLike = profile.FormFactor != DeviceFormFactor.Desktop;
-        var useWebKit = profile.BrowserEngine == BrowserEngine.WebKit;
+        var useNative = profile.UseNativeDevice;
+        var isMobileLike = !useNative && profile.FormFactor != DeviceFormFactor.Desktop;
+        var useWebKit = !useNative && profile.BrowserEngine == BrowserEngine.WebKit;
         var viewport = new ViewportSize { Width = profile.ViewportWidth, Height = profile.ViewportHeight };
 
         var isLinux = OperatingSystem.IsLinux();
@@ -60,8 +61,8 @@ public sealed class PlaywrightBrowserFactory
         var launchOptions = new BrowserTypeLaunchPersistentContextOptions
         {
             Headless = headless,
-            UserAgent = profile.UserAgent,
-            ViewportSize = viewport,
+            UserAgent = useNative ? null : profile.UserAgent,
+            ViewportSize = useNative ? null : viewport,
             Locale = profile.Locale,
             TimezoneId = profile.Timezone,
             Geolocation = new Geolocation
@@ -71,13 +72,15 @@ public sealed class PlaywrightBrowserFactory
             },
             Permissions = ["geolocation"],
             ColorScheme = ColorScheme.Light,
-            DeviceScaleFactor = (float)profile.DeviceScaleFactor,
+            DeviceScaleFactor = useNative ? null : (float)profile.DeviceScaleFactor,
             IsMobile = useWebKit && isMobileLike,
             HasTouch = isMobileLike,
             SlowMo = isLinux ? 0 : 50,
-            Args = useWebKit
-                ? BuildWebKitArgs(profile)
-                : BuildChromeArgs(profile, windowPosition, isLinux),
+            Args = useNative
+                ? BuildNativeChromeArgs(profile, isLinux)
+                : useWebKit
+                    ? BuildWebKitArgs(profile)
+                    : BuildChromeArgs(profile, windowPosition, isLinux),
             Timeout = 120_000,
             ExtraHTTPHeaders = new Dictionary<string, string>
             {
@@ -85,7 +88,7 @@ public sealed class PlaywrightBrowserFactory
             }
         };
 
-        if (isMobileLike)
+        if (!useNative && isMobileLike)
         {
             launchOptions.ScreenSize = new ScreenSize
             {
@@ -135,10 +138,12 @@ public sealed class PlaywrightBrowserFactory
             context = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, launchOptions);
         }
 
-        await context.AddInitScriptAsync(StealthScripts.BuildInitScript(profile));
+        if (!useNative)
+            await context.AddInitScriptAsync(StealthScripts.BuildInitScript(profile));
 
         var page = context.Pages.Count > 0 ? context.Pages[0] : await context.NewPageAsync();
-        await StabilizeViewportAsync(context, page, profile);
+        if (!useNative)
+            await StabilizeViewportAsync(context, page, profile);
 
         return new BrowserLaunchResult
         {
@@ -162,6 +167,28 @@ public sealed class PlaywrightBrowserFactory
 
     private static string[] BuildWebKitArgs(DesktopProfile profile) =>
         [$"--lang={profile.Locale}"];
+
+    private static string[] BuildNativeChromeArgs(DesktopProfile profile, bool isLinux)
+    {
+        var common = new List<string>
+        {
+            "--disable-blink-features=AutomationControlled",
+            "--disable-infobars",
+            $"--lang={profile.Locale}",
+            "--no-first-run",
+            "--no-default-browser-check"
+        };
+
+        if (isLinux)
+        {
+            common.Add("--disable-gpu");
+            var hasDisplay = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DISPLAY"));
+            if (!hasDisplay)
+                common.Add("--disable-software-rasterizer");
+        }
+
+        return common.ToArray();
+    }
 
     private static string[] BuildChromeArgs(DesktopProfile profile, (int X, int Y) windowPosition, bool isLinux)
     {

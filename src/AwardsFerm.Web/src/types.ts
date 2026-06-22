@@ -53,6 +53,7 @@ export interface SessionEvent {
 
 export type SessionDevicePlatform =
   | 'Random'
+  | 'Native'
   | 'Desktop'
   | 'Laptop'
   | 'Tablet'
@@ -61,12 +62,21 @@ export type SessionDevicePlatform =
 
 export const DEVICE_PLATFORM_OPTIONS: { value: SessionDevicePlatform; label: string }[] = [
   { value: 'Random', label: 'Случайно' },
+  { value: 'Native', label: 'Отсутствует' },
   { value: 'Desktop', label: 'ПК' },
   { value: 'Laptop', label: 'Ноутбук' },
   { value: 'Tablet', label: 'Планшет' },
   { value: 'AndroidPhone', label: 'Android смартфон' },
   { value: 'IPhone', label: 'Apple смартфон' },
 ]
+
+export interface BrowserTabInfo {
+  index: number
+  url: string
+  title: string
+  isActive: boolean
+  isCaptcha: boolean
+}
 
 export interface SessionSlotConfig {
   id?: number

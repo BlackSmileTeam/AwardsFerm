@@ -2,7 +2,7 @@ using Microsoft.Playwright;
 
 namespace AwardsFerm.Infrastructure.Playwright;
 
-internal sealed class ActivePageHolder
+public sealed class ActivePageHolder
 {
     public required IBrowserContext Context { get; init; }
     public required IPage Page { get; set; }

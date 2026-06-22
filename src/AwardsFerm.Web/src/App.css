@@ -1128,6 +1128,115 @@
   gap: 0.5rem;
 }
 
+.popup-dialog-wide {
+  width: min(92vw, 560px);
+}
+
+.browser-tabs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.browser-tabs-header h3 {
+  flex: 1;
+}
+
+.browser-tabs-refresh {
+  flex-shrink: 0;
+}
+
+.browser-tabs-error {
+  margin: 0.65rem 0 0;
+  color: #f28b82;
+  font-size: 0.85rem;
+}
+
+.browser-tabs-empty {
+  margin: 0.75rem 0 0;
+  color: #9aa0a6;
+  font-size: 0.9rem;
+}
+
+.browser-tabs-list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  max-height: min(50vh, 360px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.browser-tabs-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.55rem 0.6rem;
+  background: #1c2230;
+  border: 1px solid #2d3348;
+  border-radius: 8px;
+}
+
+.browser-tabs-item-active {
+  border-color: #5c9fd6;
+}
+
+.browser-tabs-item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.browser-tabs-item-title {
+  font-size: 0.88rem;
+  color: #e8eaed;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.browser-tabs-item-url {
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+  color: #9aa0a6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.browser-tabs-badge {
+  font-size: 0.68rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: #2d3348;
+  color: #bdc1c6;
+}
+
+.browser-tabs-close {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #bdc1c6;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.browser-tabs-close:hover:not(:disabled) {
+  background: #3c4458;
+  color: #f28b82;
+}
+
+.browser-tabs-close:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Login */
 .login-page {
   min-height: 100vh;

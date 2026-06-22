@@ -1,5 +1,6 @@
 import type {
   AdAccount,
+  BrowserTabInfo,
   CreateAdAccountRequest,
   CreateProxyRequest,
   ProxyConfig,
@@ -258,6 +259,28 @@ export async function previewCloseCaptchaTabByProfile(profileId: string): Promis
   if (!res.ok) {
     const text = await res.text()
     throw new Error(text || 'Не удалось закрыть вкладку капчи')
+  }
+}
+
+export async function fetchBrowserTabsByProfile(profileId: string): Promise<BrowserTabInfo[]> {
+  const res = await apiFetch(
+    `/api/sessions/profile/${encodeURIComponent(profileId)}/preview/tabs`,
+  )
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Не удалось получить список вкладок')
+  }
+  return (await res.json()) as BrowserTabInfo[]
+}
+
+export async function closeBrowserTabByProfile(profileId: string, index: number): Promise<void> {
+  const res = await apiFetch(
+    `/api/sessions/profile/${encodeURIComponent(profileId)}/preview/tabs/${index}`,
+    { method: 'DELETE' },
+  )
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Не удалось закрыть вкладку')
   }
 }
 

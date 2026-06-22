@@ -4,6 +4,8 @@ namespace AwardsFerm.Core.Models;
 public enum SessionDevicePlatform
 {
     Random,
+    /// <summary>Без эмуляции устройства — параметры браузера как на хосте.</summary>
+    Native,
     Desktop,
     Laptop,
     Tablet,

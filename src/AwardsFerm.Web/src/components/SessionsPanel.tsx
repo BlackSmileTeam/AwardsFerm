@@ -16,6 +16,8 @@ import {
   previewClickByProfile,
   previewCloseCaptchaTabByProfile,
   previewReloadByProfile,
+  fetchBrowserTabsByProfile,
+  closeBrowserTabByProfile,
   resumeSessionByProfile,
   setPreviewByProfile,
   fetchPreviewFrame,
@@ -27,6 +29,7 @@ import {
   createEmptySlotState,
   DEVICE_PLATFORM_OPTIONS,
   type AdAccount,
+  type BrowserTabInfo,
   type ProxyConfig,
   type SessionDevicePlatform,
   type SessionEvent,
@@ -758,6 +761,11 @@ function SessionCard({
   const [clickError, setClickError] = useState<string | null>(null)
   const [previewActionPending, setPreviewActionPending] = useState(false)
   const [previewActionError, setPreviewActionError] = useState<string | null>(null)
+  const [tabsOpen, setTabsOpen] = useState(false)
+  const [tabsLoading, setTabsLoading] = useState(false)
+  const [tabsError, setTabsError] = useState<string | null>(null)
+  const [browserTabs, setBrowserTabs] = useState<BrowserTabInfo[]>([])
+  const [tabClosePending, setTabClosePending] = useState<number | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewFullscreen, setPreviewFullscreen] = useState(false)
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -950,6 +958,49 @@ function SessionCard({
       window.setTimeout(() => setPreviewActionError(null), 5000)
     } finally {
       setPreviewActionPending(false)
+    }
+  }
+
+  const loadBrowserTabs = async () => {
+    setTabsLoading(true)
+    setTabsError(null)
+    try {
+      const tabs = await fetchBrowserTabsByProfile(config.profileId)
+      setBrowserTabs(tabs)
+    } catch (e) {
+      setTabsError(e instanceof Error ? e.message : 'Не удалось загрузить вкладки')
+      setBrowserTabs([])
+    } finally {
+      setTabsLoading(false)
+    }
+  }
+
+  const openTabsPopup = () => {
+    setMenuOpen(false)
+    setTabsOpen(true)
+    void loadBrowserTabs()
+  }
+
+  const closeTabsPopup = () => {
+    setTabsOpen(false)
+    setTabsError(null)
+    setBrowserTabs([])
+    setTabClosePending(null)
+  }
+
+  const handleCloseTab = async (index: number) => {
+    if (tabClosePending !== null) return
+
+    setTabClosePending(index)
+    setTabsError(null)
+    try {
+      await closeBrowserTabByProfile(config.profileId, index)
+      await loadBrowserTabs()
+      await refreshPreviewFrame()
+    } catch (e) {
+      setTabsError(e instanceof Error ? e.message : 'Не удалось закрыть вкладку')
+    } finally {
+      setTabClosePending(null)
     }
   }
 
@@ -1197,6 +1248,15 @@ function SessionCard({
                 onClick={() => void runPreviewAction('reload')}
               >
                 ↻ Обновить страницу
+              </button>
+              <button
+                type="button"
+                className="session-menu-item"
+                role="menuitem"
+                disabled={!isOccupied}
+                onClick={openTabsPopup}
+              >
+                Вкладки браузера
               </button>
               <button
                 type="button"
@@ -1462,6 +1522,72 @@ function SessionCard({
           ) : null}
         </div>
       )}
+
+      {tabsOpen ? (
+        <div className="popup-overlay" onClick={closeTabsPopup}>
+          <div
+            className="popup-dialog popup-dialog-wide"
+            role="dialog"
+            aria-labelledby={`tabs-title-${config.profileId}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="browser-tabs-header">
+              <h3 id={`tabs-title-${config.profileId}`}>Вкладки браузера</h3>
+              <button
+                type="button"
+                className="btn-icon browser-tabs-refresh"
+                onClick={() => void loadBrowserTabs()}
+                disabled={tabsLoading}
+                title="Обновить список"
+                aria-label="Обновить список вкладок"
+              >
+                ↻
+              </button>
+            </div>
+            {tabsError ? <p className="browser-tabs-error">{tabsError}</p> : null}
+            {tabsLoading && browserTabs.length === 0 ? (
+              <p className="browser-tabs-empty">Загрузка…</p>
+            ) : browserTabs.length === 0 ? (
+              <p className="browser-tabs-empty">Нет открытых вкладок</p>
+            ) : (
+              <ul className="browser-tabs-list">
+                {browserTabs.map((tab) => (
+                  <li
+                    key={`${tab.index}-${tab.url}`}
+                    className={`browser-tabs-item${tab.isActive ? ' browser-tabs-item-active' : ''}`}
+                  >
+                    <div className="browser-tabs-item-main">
+                      <div className="browser-tabs-item-title">
+                        {tab.title || 'Без названия'}
+                        {tab.isCaptcha ? <span className="browser-tabs-badge">капча</span> : null}
+                        {tab.isActive ? <span className="browser-tabs-badge">активна</span> : null}
+                      </div>
+                      <div className="browser-tabs-item-url" title={tab.url}>
+                        {tab.url || 'about:blank'}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="browser-tabs-close"
+                      onClick={() => void handleCloseTab(tab.index)}
+                      disabled={tabClosePending !== null}
+                      title="Закрыть вкладку"
+                      aria-label="Закрыть вкладку"
+                    >
+                      {tabClosePending === tab.index ? '…' : '✕'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="popup-actions">
+              <button type="button" className="btn btn-secondary btn-sm" onClick={closeTabsPopup}>
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }

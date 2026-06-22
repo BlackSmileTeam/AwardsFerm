@@ -202,19 +202,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
 
                 await _cookieStore.LoadAsync(context, sessionProfile.CookiesPath, sessionCt);
                 trafficMonitor = await SessionTrafficMonitor.AttachAsync(context, sessionCt);
-                _remoteInput.Register(profile.Id, () =>
-                {
-                    if (activePage is null)
-                        return null;
-                    try
-                    {
-                        return activePage.ResolveForPreview();
-                    }
-                    catch
-                    {
-                        return null;
-                    }
-                });
+                _remoteInput.Register(profile.Id, () => activePage);
                 _ = StreamScreenshotsAsync(sessionId, profile.Id, activePage, screenshotCts.Token);
                 _ = StreamTrafficAsync(sessionId, () => accumulatedTrafficBytes, () => trafficMonitor, activity, trafficCts.Token);
                 _ = StreamGeoDriftAsync(activePage, sessionProfile, geoCts.Token);

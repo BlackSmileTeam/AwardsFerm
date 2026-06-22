@@ -203,6 +203,23 @@ public sealed class SessionExecutionService
         _logger.LogDebug("Profile {ProfileId}: закрыта вкладка Captcha Verification", profileId);
     }
 
+    public async Task<IReadOnlyList<BrowserTabInfo>> ListBrowserTabsAsync(
+        string profileId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _remoteInput.ListTabsAsync(profileId, cancellationToken);
+    }
+
+    public async Task CloseBrowserTabAsync(
+        string profileId,
+        int index,
+        CancellationToken cancellationToken = default)
+    {
+        await _remoteInput.CloseTabByIndexAsync(profileId, index, cancellationToken);
+        _previewCoordinator.RequestImmediateCapture(profileId);
+        _logger.LogDebug("Profile {ProfileId}: закрыта вкладка {Index}", profileId, index);
+    }
+
     private async Task StopExecutionAsync(
         string profileId,
         CancellationToken cancellationToken,

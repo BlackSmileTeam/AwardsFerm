@@ -133,6 +133,39 @@ app.MapPost("/internal/preview/{profileId}/close-captcha-tab", async (
     }
 });
 
+app.MapGet("/internal/preview/{profileId}/tabs", async (
+    string profileId,
+    SessionExecutionService executor,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var tabs = await executor.ListBrowserTabsAsync(profileId, cancellationToken);
+        return Results.Ok(tabs);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Conflict(ex.Message);
+    }
+});
+
+app.MapDelete("/internal/preview/{profileId}/tabs/{index:int}", async (
+    string profileId,
+    int index,
+    SessionExecutionService executor,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        await executor.CloseBrowserTabAsync(profileId, index, cancellationToken);
+        return Results.NoContent();
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Conflict(ex.Message);
+    }
+});
+
 app.MapPost("/internal/stop", async (SessionExecutionService executor, CancellationToken cancellationToken) =>
 {
     foreach (var profileId in new[] { "session-001", "session-002", "session-003" })

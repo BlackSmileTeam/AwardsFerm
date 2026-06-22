@@ -203,6 +203,50 @@ public sealed class SessionRunnerService
         }
     }
 
+    public async Task<IReadOnlyList<BrowserTabInfo>> ListBrowserTabsAsync(
+        string profileId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await IsWorkerHealthyAsync(cancellationToken))
+            throw new InvalidOperationException("Worker не запущен.");
+
+        var client = _httpClientFactory.CreateClient("worker");
+        var response = await client.GetAsync(
+            $"{GetWorkerBaseUrl()}/internal/preview/{profileId}/tabs",
+            cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(body) ? "Не удалось получить список вкладок." : body);
+        }
+
+        return await response.Content.ReadFromJsonAsync<List<BrowserTabInfo>>(cancellationToken)
+               ?? [];
+    }
+
+    public async Task CloseBrowserTabAsync(
+        string profileId,
+        int index,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await IsWorkerHealthyAsync(cancellationToken))
+            throw new InvalidOperationException("Worker не запущен.");
+
+        var client = _httpClientFactory.CreateClient("worker");
+        var response = await client.DeleteAsync(
+            $"{GetWorkerBaseUrl()}/internal/preview/{profileId}/tabs/{index}",
+            cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(body) ? "Не удалось закрыть вкладку." : body);
+        }
+    }
+
     public async Task<string?> GetPreviewFrameAsync(string profileId, CancellationToken cancellationToken = default)
     {
         if (!await IsWorkerHealthyAsync(cancellationToken))

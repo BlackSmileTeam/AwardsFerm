@@ -242,6 +242,51 @@ public sealed class SessionsController : ControllerBase
         }
     }
 
+    [HttpGet("profile/{profileId}/preview/tabs")]
+    public async Task<IActionResult> GetBrowserTabsByProfile(string profileId, CancellationToken cancellationToken)
+    {
+        var userId = GetUserId();
+        var adAccountId = await _resolver.ResolveAdAccountByProfileAsync(userId, profileId, cancellationToken);
+        if (adAccountId is null)
+            return NotFound();
+        if (!await _resolver.UserOwnsAccountAsync(userId, adAccountId.Value, cancellationToken))
+            return Forbid();
+
+        try
+        {
+            var tabs = await _runner.ListBrowserTabsAsync(profileId, cancellationToken);
+            return Ok(tabs);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    [HttpDelete("profile/{profileId}/preview/tabs/{index:int}")]
+    public async Task<IActionResult> CloseBrowserTabByProfile(
+        string profileId,
+        int index,
+        CancellationToken cancellationToken)
+    {
+        var userId = GetUserId();
+        var adAccountId = await _resolver.ResolveAdAccountByProfileAsync(userId, profileId, cancellationToken);
+        if (adAccountId is null)
+            return NotFound();
+        if (!await _resolver.UserOwnsAccountAsync(userId, adAccountId.Value, cancellationToken))
+            return Forbid();
+
+        try
+        {
+            await _runner.CloseBrowserTabAsync(profileId, index, cancellationToken);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
     [HttpGet("profile/{profileId}/preview/frame")]
     public async Task<IActionResult> GetPreviewFrameByProfile(string profileId, CancellationToken cancellationToken)
     {
