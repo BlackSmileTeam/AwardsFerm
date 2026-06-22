@@ -96,7 +96,8 @@ internal static class SessionActivityWatchdog
                 var step = activity.CurrentStep;
 
                 if (step >= 12 &&
-                    (await YandexUiHelper.IsGameRunningAsync(page) || await CaptchaHelper.IsPresentAsync(page)))
+                    (await YandexUiHelper.IsGameRunningAsync(page) ||
+                     await CaptchaHelper.IsPresentInContextAsync(page.Context)))
                 {
                     unresponsiveStreak = 0;
                     activity.MarkActivity();
@@ -153,7 +154,7 @@ internal static class SessionActivityWatchdog
                     continue;
                 }
 
-                if (step >= 12 && await CaptchaHelper.IsPresentAsync(page))
+                if (step >= 12 && await CaptchaHelper.IsPresentInContextAsync(page.Context))
                     continue;
 
                 var url = page.Url;

@@ -53,6 +53,9 @@ internal static class CaptchaHelper
         if (IsCaptchaUrl(page.Url))
             return true;
 
+        if (await IsCaptchaVerificationPageAsync(page))
+            return true;
+
         if (await HasSmartCaptchaDomAsync(page))
             return true;
 
@@ -82,6 +85,77 @@ internal static class CaptchaHelper
         return false;
     }
 
+    public static async Task<bool> IsPresentInContextAsync(IBrowserContext context)
+    {
+        foreach (var page in context.Pages.ToList())
+        {
+            if (!page.IsClosed && await IsPresentAsync(page))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Ищет вкладку с ручной капчей (приоритет — Captcha Verification).
+    /// </summary>
+    public static async Task<IPage?> FindManualCaptchaPageAsync(IBrowserContext context)
+    {
+        IPage? fallback = null;
+
+        foreach (var page in context.Pages.ToList())
+        {
+            if (page.IsClosed)
+                continue;
+
+            if (await IsCaptchaVerificationPageAsync(page))
+                return page;
+
+            if (await RequiresManualSolveAsync(page))
+                fallback ??= page;
+            else if (fallback is null && await IsPresentAsync(page))
+                fallback = page;
+        }
+
+        return fallback;
+    }
+
+    public static async Task<bool> IsCaptchaVerificationPageAsync(IPage page)
+    {
+        if (page.IsClosed)
+            return false;
+
+        try
+        {
+            var title = await page.TitleAsync();
+            if (!string.IsNullOrWhiteSpace(title) &&
+                title.Contains("Captcha Verification", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        catch
+        {
+            // ignore
+        }
+
+        var url = page.Url;
+        if (url.Contains("ads-captcha.yandex.", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        try
+        {
+            var body = await page.Locator("body").InnerTextAsync();
+            if (!string.IsNullOrWhiteSpace(body) &&
+                body.Contains("Captcha Verification", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Yandex SmartCaptcha (ads-captcha) — только ручное решение через «Просмотр».
     /// </summary>
@@ -89,6 +163,9 @@ internal static class CaptchaHelper
     {
         if (page.IsClosed)
             return false;
+
+        if (await IsCaptchaVerificationPageAsync(page))
+            return true;
 
         var url = page.Url;
         if (url.Contains("ads-captcha.yandex.ru", StringComparison.OrdinalIgnoreCase) ||
@@ -183,109 +260,183 @@ internal static class CaptchaHelper
         string sessionId,
         ISessionEventReporter reporter,
         CancellationToken cancellationToken,
-        int maxWaitMinutes = 5)
+        int maxWaitMinutes = 5,
+        IBrowserContext? context = null,
+        string? profileId = null,
+        ISessionPauseCoordinator? pauseCoordinator = null,
+        ActivePageHolder? activePage = null)
     {
-        if (!await IsPresentAsync(page))
+        var captchaPage = context is not null
+            ? await FindManualCaptchaPageAsync(context)
+            : null;
+
+        if (captchaPage is null && !await IsPresentAsync(page))
             return;
 
-        var pageUrl = page.Url;
-        var manualOnly = await RequiresManualSolveAsync(page);
-        var headless = ResolveHeadlessMode();
+        captchaPage ??= page;
 
-        if (manualOnly)
+        if (activePage is not null)
+            activePage.CaptchaFocusPage = captchaPage;
+
+        try
         {
+            try
+            {
+                await captchaPage.BringToFrontAsync();
+            }
+            catch
+            {
+                // ignore
+            }
+
+            var pageUrl = captchaPage.Url;
+            var manualOnly = await RequiresManualSolveAsync(captchaPage);
+            var headless = ResolveHeadlessMode();
+
+            if (manualOnly)
+            {
+                if (pauseCoordinator is not null && !string.IsNullOrWhiteSpace(profileId) &&
+                    !pauseCoordinator.IsPaused(profileId))
+                {
+                    pauseCoordinator.Pause(profileId);
+                    await reporter.ReportAsync(new SessionEvent
+                    {
+                        SessionId = sessionId,
+                        Type = SessionEventType.StatusChanged,
+                        Status = SessionStatus.Paused,
+                        Message = "Пауза — Captcha Verification"
+                    }, cancellationToken);
+                }
+
+                await reporter.ReportAsync(new SessionEvent
+                {
+                    SessionId = sessionId,
+                    Type = SessionEventType.Log,
+                    Message = manualOnly && pageUrl.Contains("ads-captcha", StringComparison.OrdinalIgnoreCase)
+                        ? $"⚠ Открыта Captcha Verification ({pageUrl}) — сессия на паузе"
+                        : $"⚠ Обнаружена SmartCaptcha ({pageUrl}) — решается только вручную"
+                }, cancellationToken);
+
+                await reporter.ReportAsync(new SessionEvent
+                {
+                    SessionId = sessionId,
+                    Type = SessionEventType.Log,
+                    Message = headless
+                        ? "⚠ Откройте «Просмотр» → «На весь экран» и пройдите капчу на экране"
+                        : "⚠ Откройте «Просмотр» и пройдите капчу — автоматически она не решается"
+                }, cancellationToken);
+
+                await WaitUntilResolvedAsync(
+                    captchaPage, sessionId, reporter, cancellationToken,
+                    maxWaitMinutes: 15, manualOnly: true, context: context,
+                    profileId: profileId, pauseCoordinator: pauseCoordinator);
+                return;
+            }
+
             await reporter.ReportAsync(new SessionEvent
             {
                 SessionId = sessionId,
                 Type = SessionEventType.Log,
-                Message = $"⚠ Обнаружена SmartCaptcha ({pageUrl}) — решается только вручную"
+                Message = $"⚠ ВНИМАНИЕ: обнаружена капча «Я не робот» ({pageUrl})"
             }, cancellationToken);
 
-            await reporter.ReportAsync(new SessionEvent
-            {
-                SessionId = sessionId,
-                Type = SessionEventType.Log,
-                Message = headless
-                    ? "⚠ Откройте «Просмотр» → «На весь экран» и пройдите капчу на экране"
-                    : "⚠ Откройте «Просмотр» и пройдите капчу — автоматически она не решается"
-            }, cancellationToken);
-
-            await WaitUntilResolvedAsync(page, sessionId, reporter, cancellationToken, maxWaitMinutes: 15, manualOnly: true);
-            return;
-        }
-
-        await reporter.ReportAsync(new SessionEvent
-        {
-            SessionId = sessionId,
-            Type = SessionEventType.Log,
-            Message = $"⚠ ВНИМАНИЕ: обнаружена капча «Я не робот» ({pageUrl})"
-        }, cancellationToken);
-
-        if (headless)
-        {
-            await reporter.ReportAsync(new SessionEvent
-            {
-                SessionId = sessionId,
-                Type = SessionEventType.Log,
-                Message = "⚠ Headless-режим: откройте «Просмотр» и кликните по капче на экране"
-            }, cancellationToken);
-        }
-        else
-        {
-            await reporter.ReportAsync(new SessionEvent
-            {
-                SessionId = sessionId,
-                Type = SessionEventType.Log,
-                Message = "Если автоклик не сработает — откройте «Просмотр» и кликните по капче на экране"
-            }, cancellationToken);
-        }
-
-        await reporter.ReportAsync(new SessionEvent
-        {
-            SessionId = sessionId,
-            Type = SessionEventType.Log,
-            Message = "Капча — пробуем нажать галочку…"
-        }, cancellationToken);
-
-        for (var attempt = 1; attempt <= 4; attempt++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (await TryAutoSolveAsync(page, cancellationToken))
+            if (headless)
             {
                 await reporter.ReportAsync(new SessionEvent
                 {
                     SessionId = sessionId,
                     Type = SessionEventType.Log,
-                    Message = "✓ Капча пройдена (галочка нажата)"
+                    Message = "⚠ Headless-режим: откройте «Просмотр» и кликните по капче на экране"
                 }, cancellationToken);
-                await HumanBehavior.DelayAsync(2000, 4000, cancellationToken);
-                return;
             }
-
-            if (!await IsPresentAsync(page))
+            else
             {
                 await reporter.ReportAsync(new SessionEvent
                 {
                     SessionId = sessionId,
                     Type = SessionEventType.Log,
-                    Message = "✓ Капча пройдена, продолжаем сценарий"
+                    Message = "Если автоклик не сработает — откройте «Просмотр» и кликните по капче на экране"
                 }, cancellationToken);
-                await HumanBehavior.DelayAsync(2000, 4000, cancellationToken);
-                return;
             }
 
-            await Task.Delay(2000, cancellationToken);
+            await reporter.ReportAsync(new SessionEvent
+            {
+                SessionId = sessionId,
+                Type = SessionEventType.Log,
+                Message = "Капча — пробуем нажать галочку…"
+            }, cancellationToken);
+
+            for (var attempt = 1; attempt <= 4; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (pauseCoordinator is not null && !string.IsNullOrWhiteSpace(profileId))
+                    await pauseCoordinator.WaitIfPausedAsync(profileId, sessionId, reporter, cancellationToken);
+
+                if (await TryAutoSolveAsync(captchaPage, cancellationToken))
+                {
+                    await reporter.ReportAsync(new SessionEvent
+                    {
+                        SessionId = sessionId,
+                        Type = SessionEventType.Log,
+                        Message = "✓ Капча пройдена (галочка нажата)"
+                    }, cancellationToken);
+                    await HumanBehavior.DelayAsync(2000, 4000, cancellationToken);
+                    return;
+                }
+
+                if (!await IsPresentInScopeAsync(captchaPage, context))
+                {
+                    await reporter.ReportAsync(new SessionEvent
+                    {
+                        SessionId = sessionId,
+                        Type = SessionEventType.Log,
+                        Message = "✓ Капча пройдена, продолжаем сценарий"
+                    }, cancellationToken);
+                    await HumanBehavior.DelayAsync(2000, 4000, cancellationToken);
+                    return;
+                }
+
+                await Task.Delay(2000, cancellationToken);
+            }
+
+            await reporter.ReportAsync(new SessionEvent
+            {
+                SessionId = sessionId,
+                Type = SessionEventType.Log,
+                Message = "⚠ Автоклик не помог — откройте «Просмотр» и кликните по капче…"
+            }, cancellationToken);
+
+            if (pauseCoordinator is not null && !string.IsNullOrWhiteSpace(profileId) &&
+                !pauseCoordinator.IsPaused(profileId))
+            {
+                pauseCoordinator.Pause(profileId);
+                await reporter.ReportAsync(new SessionEvent
+                {
+                    SessionId = sessionId,
+                    Type = SessionEventType.StatusChanged,
+                    Status = SessionStatus.Paused,
+                    Message = "Пауза — капча"
+                }, cancellationToken);
+            }
+
+            await WaitUntilResolvedAsync(
+                captchaPage, sessionId, reporter, cancellationToken, maxWaitMinutes, manualOnly: true,
+                context: context, profileId: profileId, pauseCoordinator: pauseCoordinator);
         }
-
-        await reporter.ReportAsync(new SessionEvent
+        finally
         {
-            SessionId = sessionId,
-            Type = SessionEventType.Log,
-            Message = "⚠ Автоклик не помог — откройте «Просмотр» и кликните по капче…"
-        }, cancellationToken);
+            if (activePage is not null && ReferenceEquals(activePage.CaptchaFocusPage, captchaPage))
+                activePage.CaptchaFocusPage = null;
+        }
+    }
 
-        await WaitUntilResolvedAsync(page, sessionId, reporter, cancellationToken, maxWaitMinutes, manualOnly: true);
+    private static async Task<bool> IsPresentInScopeAsync(IPage page, IBrowserContext? context)
+    {
+        if (context is not null)
+            return await IsPresentInContextAsync(context);
+
+        return await IsPresentAsync(page);
     }
 
     private static async Task WaitUntilResolvedAsync(
@@ -294,14 +445,20 @@ internal static class CaptchaHelper
         ISessionEventReporter reporter,
         CancellationToken cancellationToken,
         int maxWaitMinutes,
-        bool manualOnly = false)
+        bool manualOnly = false,
+        IBrowserContext? context = null,
+        string? profileId = null,
+        ISessionPauseCoordinator? pauseCoordinator = null)
     {
         var deadline = DateTimeOffset.UtcNow.AddMinutes(maxWaitMinutes);
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!await IsPresentAsync(page))
+            if (pauseCoordinator is not null && !string.IsNullOrWhiteSpace(profileId))
+                await pauseCoordinator.WaitIfPausedAsync(profileId, sessionId, reporter, cancellationToken);
+
+            if (!await IsPresentInScopeAsync(page, context))
             {
                 await reporter.ReportAsync(new SessionEvent
                 {

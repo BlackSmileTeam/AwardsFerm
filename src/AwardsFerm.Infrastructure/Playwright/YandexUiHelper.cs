@@ -124,7 +124,10 @@ internal static class YandexUiHelper
         CancellationToken cancellationToken = default,
         DesktopProfile? profile = null,
         LandscapeState? landscapeState = null,
-        SessionStuckTracker? stuckTracker = null)
+        SessionStuckTracker? stuckTracker = null,
+        string? profileId = null,
+        ISessionPauseCoordinator? pauseCoordinator = null,
+        ActivePageHolder? activePage = null)
     {
         page = await ReacquireGamePageAsync(context, page, gameUrl, targetUrlPart, cancellationToken);
         await FocusGameTabAsync(context, page, cancellationToken);
@@ -141,6 +144,9 @@ internal static class YandexUiHelper
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            if (pauseCoordinator is not null && !string.IsNullOrWhiteSpace(profileId))
+                await pauseCoordinator.WaitIfPausedAsync(profileId, sessionId, reporter, cancellationToken);
+
             page = await ReacquireGamePageAsync(context, page, gameUrl, targetUrlPart, cancellationToken);
 
             if (await TryRecoverLoadFailureAsync(page, sessionId, reporter, stuckTracker, cancellationToken))
@@ -154,12 +160,16 @@ internal static class YandexUiHelper
                     Timeout = 60_000
                 });
                 await HumanBehavior.DelayAsync(2500, 4000, cancellationToken);
-                await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, reporter, cancellationToken);
+                await CaptchaHelper.WaitForManualSolveAsync(
+                    page, sessionId, reporter, cancellationToken,
+                    context: context, profileId: profileId, pauseCoordinator: pauseCoordinator, activePage: activePage);
             }
 
             await FocusGameTabAsync(context, page, cancellationToken);
             await DismissPopupsAsync(page, cancellationToken);
-            await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, reporter, cancellationToken);
+            await CaptchaHelper.WaitForManualSolveAsync(
+                page, sessionId, reporter, cancellationToken,
+                context: context, profileId: profileId, pauseCoordinator: pauseCoordinator, activePage: activePage);
             await OrientationHelper.EnsureLandscapeForGameAsync(
                 page, context, profile, sessionId, reporter, cancellationToken, landscapeState, stuckTracker);
 
@@ -201,7 +211,8 @@ internal static class YandexUiHelper
                 await WaitForGameFullyLoadedAsync(
                     page, cancellationToken, context: context, profile: profile,
                     sessionId: sessionId, reporter: reporter,
-                    landscapeState: landscapeState, stuckTracker: stuckTracker);
+                    landscapeState: landscapeState, stuckTracker: stuckTracker,
+                    profileId: profileId, pauseCoordinator: pauseCoordinator, activePage: activePage);
                 if (await IsGameRunningAsync(page))
                     return page;
                 continue;
@@ -270,7 +281,8 @@ internal static class YandexUiHelper
                 await WaitForGameFullyLoadedAsync(
                     page, cancellationToken, context: context, profile: profile,
                     sessionId: sessionId, reporter: reporter,
-                    landscapeState: landscapeState, stuckTracker: stuckTracker);
+                    landscapeState: landscapeState, stuckTracker: stuckTracker,
+                    profileId: profileId, pauseCoordinator: pauseCoordinator, activePage: activePage);
                 if (await IsGameRunningAsync(page))
                     return page;
             }
@@ -347,7 +359,10 @@ internal static class YandexUiHelper
         string? sessionId = null,
         ISessionEventReporter? reporter = null,
         LandscapeState? landscapeState = null,
-        SessionStuckTracker? stuckTracker = null)
+        SessionStuckTracker? stuckTracker = null,
+        string? profileId = null,
+        ISessionPauseCoordinator? pauseCoordinator = null,
+        ActivePageHolder? activePage = null)
     {
         if (page.IsClosed)
             throw new InvalidOperationException("Страница игры закрыта.");
@@ -360,6 +375,9 @@ internal static class YandexUiHelper
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (pauseCoordinator is not null && !string.IsNullOrWhiteSpace(profileId))
+                await pauseCoordinator.WaitIfPausedAsync(profileId, sessionId, reporter, cancellationToken);
 
             await DismissPopupsAsync(page, cancellationToken);
 
@@ -617,7 +635,8 @@ internal static class YandexUiHelper
             await SessionNavigationHelper.ReloadResilientAsync(page);
             await HumanBehavior.DelayAsync(2000, 3500, cancellationToken);
             await DismissPopupsAsync(page, cancellationToken);
-            await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, reporter, cancellationToken);
+            await CaptchaHelper.WaitForManualSolveAsync(
+                page, sessionId, reporter, cancellationToken, context: page.Context);
             return true;
         }
         catch

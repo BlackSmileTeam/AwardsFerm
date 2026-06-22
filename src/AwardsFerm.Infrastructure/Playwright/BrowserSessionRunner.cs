@@ -202,10 +202,28 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                 await _cookieStore.LoadAsync(context, sessionProfile.CookiesPath, sessionCt);
                 trafficMonitor = await SessionTrafficMonitor.AttachAsync(context, sessionCt);
                 _remoteInput.Register(profile.Id, () =>
-                    activePage.TryResolve(out var p) ? p : null);
+                {
+                    if (activePage is null)
+                        return null;
+                    try
+                    {
+                        return activePage.ResolveForPreview();
+                    }
+                    catch
+                    {
+                        return null;
+                    }
+                });
                 _ = StreamScreenshotsAsync(sessionId, profile.Id, activePage, screenshotCts.Token);
                 _ = StreamTrafficAsync(sessionId, () => accumulatedTrafficBytes, () => trafficMonitor, activity, trafficCts.Token);
                 _ = StreamGeoDriftAsync(activePage, sessionProfile, geoCts.Token);
+                _ = CaptchaTabWatcher.RunAsync(
+                    sessionId,
+                    profile.Id,
+                    activePage,
+                    _pauseCoordinator,
+                    _eventReporter,
+                    sessionCt);
                 _ = SessionActivityWatchdog.RunAsync(
                     sessionId,
                     profile.Id,
@@ -279,7 +297,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                 await HumanBehavior.DelayAsync(3000, 5000, sessionCt);
                 await ReportLogAsync(sessionId, "Закрываем всплывающие окна…", sessionCt);
                 await YandexUiHelper.DismissPopupsAsync(page, sessionCt);
-                await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, _eventReporter, sessionCt);
+                await WaitCaptchaAsync(page, context, profile.Id, sessionId, activePage, sessionCt);
                 await ReportLogAsync(sessionId, "Прокрутка страницы…", sessionCt);
                 await HumanBehavior.ScrollNaturallyAsync(page, sessionCt);
                 await HumanBehavior.DelayAsync(2000, 4000, sessionCt);
@@ -305,7 +323,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                     captchaReporter: _eventReporter);
                 await HumanBehavior.DelayAsync(3000, 5000, sessionCt);
                 await YandexUiHelper.DismissPopupsAsync(page, sessionCt);
-                await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, _eventReporter, sessionCt);
+                await WaitCaptchaAsync(page, context, profile.Id, sessionId, activePage, sessionCt);
             });
 
             await RunStepAsync(sessionId, profile.Id, 4, "Закрытие cookie-баннера и попапов", activity, sessionCt, async () =>
@@ -325,7 +343,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
             await RunStepAsync(sessionId, profile.Id, 5, "Открытие строки поиска", activity, sessionCt, async () =>
             {
                 page = activePage!.Resolve();
-                await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, _eventReporter, sessionCt);
+                await WaitCaptchaAsync(page, context, profile.Id, sessionId, activePage, sessionCt);
                 await YandexUiHelper.DismissPopupsAsync(page, sessionCt);
 
                 try
@@ -380,7 +398,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                 await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded, new PageWaitForLoadStateOptions { Timeout = 30_000 });
                 await HumanBehavior.DelayAsync(2500, 4000, sessionCt);
                 await YandexUiHelper.DismissPopupsAsync(page, sessionCt);
-                await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, _eventReporter, sessionCt);
+                await WaitCaptchaAsync(page, context, profile.Id, sessionId, activePage, sessionCt);
             });
 
             await RunStepAsync(sessionId, profile.Id, 8, "Ожидание результатов поиска", activity, sessionCt, async () =>
@@ -402,7 +420,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                         captchaReporter: _eventReporter);
                     await HumanBehavior.DelayAsync(2500, 4000, sessionCt);
                     await YandexUiHelper.DismissPopupsAsync(page, sessionCt);
-                    await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, _eventReporter, sessionCt);
+                    await WaitCaptchaAsync(page, context, profile.Id, sessionId, activePage, sessionCt);
                     found = await SessionNavigationHelper.TryWaitForSearchResultsAsync(page, sessionCt, 40_000);
                 }
 
@@ -455,7 +473,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
 
                 await YandexUiHelper.FocusGameTabAsync(context, gamePage, sessionCt);
                 await HumanBehavior.DelayAsync(2000, 4000, sessionCt);
-                await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, _eventReporter, sessionCt);
+                await WaitCaptchaAsync(page, context, profile.Id, sessionId, activePage, sessionCt);
                 await ReportLogAsync(sessionId, $"Открыта вкладка игры: {page.Url}", sessionCt);
             });
 
@@ -474,7 +492,10 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                     sessionCt,
                     sessionProfile,
                     landscapeState,
-                    stuckTracker);
+                    stuckTracker,
+                    profile.Id,
+                    _pauseCoordinator,
+                    activePage);
 
                 activePage!.Page = gamePage;
                 await YandexUiHelper.WaitForGameFullyLoadedAsync(
@@ -485,7 +506,10 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                     sessionId: sessionId,
                     reporter: _eventReporter,
                     landscapeState: landscapeState,
-                    stuckTracker: stuckTracker);
+                    stuckTracker: stuckTracker,
+                    profileId: profile.Id,
+                    pauseCoordinator: _pauseCoordinator,
+                    activePage: activePage);
 
                 for (var recoverAttempt = 0; recoverAttempt < 4; recoverAttempt++)
                 {
@@ -502,7 +526,7 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                     }
 
                     await YandexUiHelper.DismissPopupsAsync(gamePage, sessionCt);
-                    await CaptchaHelper.WaitForManualSolveAsync(gamePage, sessionId, _eventReporter, sessionCt);
+                    await WaitCaptchaAsync(gamePage, context, profile.Id, sessionId, activePage, sessionCt);
 
                     gamePage = await YandexUiHelper.EnterGameAsync(
                         context,
@@ -514,7 +538,10 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                         sessionCt,
                         sessionProfile,
                         landscapeState,
-                        stuckTracker);
+                        stuckTracker,
+                        profile.Id,
+                        _pauseCoordinator,
+                        activePage);
 
                     activePage!.Page = gamePage;
 
@@ -526,7 +553,10 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                         sessionId: sessionId,
                         reporter: _eventReporter,
                         landscapeState: landscapeState,
-                        stuckTracker: stuckTracker);
+                        stuckTracker: stuckTracker,
+                        profileId: profile.Id,
+                        pauseCoordinator: _pauseCoordinator,
+                        activePage: activePage);
                 }
 
                 if (await YandexUiHelper.IsGameLoadErrorVisibleAsync(gamePage) ||
@@ -562,7 +592,10 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                     sessionId: sessionId,
                     reporter: _eventReporter,
                     landscapeState: landscapeState,
-                    stuckTracker: stuckTracker);
+                    stuckTracker: stuckTracker,
+                    profileId: profile.Id,
+                    pauseCoordinator: _pauseCoordinator,
+                    activePage: activePage);
 
                 playGameOverCount = 0;
                 var playOutcome = await SlitherGamePlayHelper.PlaySessionAsync(
@@ -577,7 +610,8 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                     sessionCt,
                     sessionProfile,
                     stuckTracker,
-                    landscapeState);
+                    landscapeState,
+                    activePage);
                 playGameOverCount = playOutcome.GamesPlayed;
 
                 if (playOutcome.RotateSession)
@@ -751,6 +785,23 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
             }
         }
     }
+
+    private Task WaitCaptchaAsync(
+        IPage page,
+        IBrowserContext context,
+        string profileId,
+        string sessionId,
+        ActivePageHolder? activePage,
+        CancellationToken cancellationToken) =>
+        CaptchaHelper.WaitForManualSolveAsync(
+            page,
+            sessionId,
+            _eventReporter,
+            cancellationToken,
+            context: context,
+            profileId: profileId,
+            pauseCoordinator: _pauseCoordinator,
+            activePage: activePage);
 
     private Task ReportTrafficUpdateAsync(string sessionId, long bytes, CancellationToken sessionCt) =>
         _eventReporter.ReportAsync(new SessionEvent

@@ -65,7 +65,8 @@ internal static class SlitherGamePlayHelper
         CancellationToken cancellationToken = default,
         DesktopProfile? deviceProfile = null,
         SessionStuckTracker? stuckTracker = null,
-        LandscapeState? landscapeState = null)
+        LandscapeState? landscapeState = null,
+        ActivePageHolder? activePage = null)
     {
         _ = minSeconds;
         _ = maxSeconds;
@@ -92,7 +93,9 @@ internal static class SlitherGamePlayHelper
                 throw new PlaywrightException("Target closed");
 
             await page.BringToFrontAsync();
-            await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, reporter, cancellationToken);
+            await CaptchaHelper.WaitForManualSolveAsync(
+                page, sessionId, reporter, cancellationToken,
+                context: context, profileId: profileId, pauseCoordinator: pauseCoordinator, activePage: activePage);
 
             if (await YandexUiHelper.IsGameLoadErrorVisibleAsync(page))
             {
@@ -112,7 +115,8 @@ internal static class SlitherGamePlayHelper
             if (await IsGameOverVisibleAsync(page))
             {
                 var (rotate, _, count) = await ProcessGameOverAsync(
-                    context, page, sessionId, reporter, gameOverCount, gameOverAdState, cancellationToken);
+                    context, page, profileId, sessionId, reporter, pauseCoordinator, activePage,
+                    gameOverCount, gameOverAdState, cancellationToken);
                 gameOverCount = count;
                 if (rotate is not null)
                     return rotate;
@@ -155,11 +159,12 @@ internal static class SlitherGamePlayHelper
 
             var chunkSeconds = Random.Next(20, 35);
             var stoppedByGameOver = await SlitherChunkAsync(
-                context, page, profileId, chunkSeconds, sessionId, reporter, pauseCoordinator, cancellationToken);
+                context, page, profileId, chunkSeconds, sessionId, reporter, pauseCoordinator, activePage, cancellationToken);
             if (stoppedByGameOver)
             {
                 var (rotate, _, count) = await ProcessGameOverAsync(
-                    context, page, sessionId, reporter, gameOverCount, gameOverAdState, cancellationToken);
+                    context, page, profileId, sessionId, reporter, pauseCoordinator, activePage,
+                    gameOverCount, gameOverAdState, cancellationToken);
                 gameOverCount = count;
                 if (rotate is not null)
                     return rotate;
@@ -173,8 +178,11 @@ internal static class SlitherGamePlayHelper
     private static async Task<(PlaySessionOutcome? Rotate, bool AdShown, int GamesPlayed)> ProcessGameOverAsync(
         IBrowserContext context,
         IPage page,
+        string profileId,
         string sessionId,
         ISessionEventReporter reporter,
+        ISessionPauseCoordinator pauseCoordinator,
+        ActivePageHolder? activePage,
         int gameOverCount,
         GameOverAdState gameOverAdState,
         CancellationToken cancellationToken)
@@ -183,7 +191,8 @@ internal static class SlitherGamePlayHelper
         await LogAsync(sessionId, reporter, $"Игра окончена ({gameOverCount}/{GamesPerSession})", cancellationToken);
 
         var adShown = await HandleGameOverCycleAsync(
-            context, page, sessionId, reporter, gameOverAdState, cancellationToken);
+            context, page, profileId, sessionId, reporter, pauseCoordinator, activePage,
+            gameOverAdState, cancellationToken);
         if (page.IsClosed)
             throw new PlaywrightException("Target closed");
 
@@ -201,8 +210,11 @@ internal static class SlitherGamePlayHelper
     private static async Task<bool> HandleGameOverCycleAsync(
         IBrowserContext context,
         IPage page,
+        string profileId,
         string sessionId,
         ISessionEventReporter reporter,
+        ISessionPauseCoordinator pauseCoordinator,
+        ActivePageHolder? activePage,
         GameOverAdState adState,
         CancellationToken cancellationToken)
     {
@@ -236,7 +248,9 @@ internal static class SlitherGamePlayHelper
             await HumanBehavior.DelayAsync(800, 1500, cancellationToken);
         }
 
-        await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, reporter, cancellationToken);
+        await CaptchaHelper.WaitForManualSolveAsync(
+            page, sessionId, reporter, cancellationToken,
+            context: context, profileId: profileId, pauseCoordinator: pauseCoordinator, activePage: activePage);
 
         if (await TryClickPlayAgainAsync(page, cancellationToken))
         {
@@ -262,6 +276,7 @@ internal static class SlitherGamePlayHelper
         string sessionId,
         ISessionEventReporter reporter,
         ISessionPauseCoordinator pauseCoordinator,
+        ActivePageHolder? activePage,
         CancellationToken cancellationToken)
     {
         var deadline = DateTimeOffset.UtcNow.AddSeconds(seconds);
@@ -276,8 +291,10 @@ internal static class SlitherGamePlayHelper
 
             if (++checks % 8 == 0)
             {
-                if (await CaptchaHelper.IsPresentAsync(page))
-                    await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, reporter, cancellationToken);
+                if (await CaptchaHelper.IsPresentInContextAsync(context))
+                    await CaptchaHelper.WaitForManualSolveAsync(
+                        page, sessionId, reporter, cancellationToken,
+                        context: context, profileId: profileId, pauseCoordinator: pauseCoordinator, activePage: activePage);
 
                 if (await IsGameOverVisibleAsync(page))
                     return true;

@@ -8,6 +8,17 @@ internal sealed class ActivePageHolder
     public required IPage Page { get; set; }
     public string? UrlPart { get; set; }
 
+    /// <summary>Вкладка с ручной капчей — приоритет для «Просмотра».</summary>
+    public IPage? CaptchaFocusPage { get; set; }
+
+    public IPage ResolveForPreview()
+    {
+        if (CaptchaFocusPage is { IsClosed: false } captchaPage)
+            return captchaPage;
+
+        return Resolve();
+    }
+
     public IPage Resolve()
     {
         if (!Page.IsClosed)
