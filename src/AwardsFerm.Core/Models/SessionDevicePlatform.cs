@@ -8,6 +8,7 @@ public enum SessionDevicePlatform
     Native,
     Desktop,
     Laptop,
+    MacBook,
     Tablet,
     AndroidPhone,
     IPhone

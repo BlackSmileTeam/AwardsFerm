@@ -72,6 +72,15 @@ internal static class DeviceFingerprintRotator
         ("Apple Inc.", "Apple A16 GPU")
     ];
 
+    private static readonly (string Model, int W, int H, double Dpr)[] MacBookModels =
+    [
+        ("MacBookAir10,1", 1280, 832, 2),
+        ("Mac14,2", 1440, 900, 2),
+        ("Mac15,3", 1512, 982, 2),
+        ("Mac15,7", 1728, 1117, 2),
+        ("Mac15,6", 1680, 1050, 2)
+    ];
+
     private static readonly (string Model, int W, int H, double Dpr)[] IPhoneModels =
     [
         ("iPhone15,4", 393, 852, 3),
@@ -221,6 +230,7 @@ internal static class DeviceFingerprintRotator
         {
             SessionDevicePlatform.Desktop,
             SessionDevicePlatform.Laptop,
+            SessionDevicePlatform.MacBook,
             SessionDevicePlatform.Tablet,
             SessionDevicePlatform.AndroidPhone,
             SessionDevicePlatform.IPhone
@@ -236,6 +246,7 @@ internal static class DeviceFingerprintRotator
         {
             SessionDevicePlatform.Desktop => PickDesktop(chromeMajor, chromeBuild),
             SessionDevicePlatform.Laptop => PickLaptop(chromeMajor, chromeBuild),
+            SessionDevicePlatform.MacBook => PickMacBook(),
             SessionDevicePlatform.Tablet => PickTablet(chromeMajor, chromeBuild),
             SessionDevicePlatform.AndroidPhone => PickAndroidPhone(chromeMajor, chromeBuild),
             SessionDevicePlatform.IPhone => PickIPhone(),
@@ -304,6 +315,33 @@ internal static class DeviceFingerprintRotator
             gpu.Vendor,
             gpu.Renderer,
             BuildChromeUserAgent(chromeMajor, chromeBuild));
+    }
+
+    private static DeviceTemplate PickMacBook()
+    {
+        var mac = MacBookModels[Random.Next(MacBookModels.Length)];
+        var gpu = AppleGpus[Random.Next(AppleGpus.Length)];
+        var macOsMajor = Random.Next(13, 16);
+        var macOsMinor = Random.Next(0, 6);
+        var macOsPatch = Random.Next(0, 4);
+        var safariMajor = macOsMajor >= 15 ? Random.Next(18, 20) : Random.Next(16, 18);
+        var safariMinor = Random.Next(0, 4);
+        var memory = new[] { 8, 16, 24 }[Random.Next(3)];
+
+        return new DeviceTemplate(
+            SessionDevicePlatform.MacBook,
+            DeviceFormFactor.Desktop,
+            BrowserEngine.WebKit,
+            mac.W,
+            mac.H,
+            mac.Dpr,
+            8,
+            memory,
+            "MacIntel",
+            0,
+            gpu.Vendor,
+            gpu.Renderer,
+            $"Mozilla/5.0 (Macintosh; Intel Mac OS X {macOsMajor}_{macOsMinor}_{macOsPatch}) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{safariMajor}.{safariMinor} Safari/605.1.15");
     }
 
     private static DeviceTemplate PickTablet(int chromeMajor, int chromeBuild)
@@ -425,6 +463,7 @@ internal static class DeviceFingerprintRotator
             SessionDevicePlatform.Native => "без эмуляции (текущая машина)",
             SessionDevicePlatform.Desktop => "ПК",
             SessionDevicePlatform.Laptop => "ноутбук",
+            SessionDevicePlatform.MacBook => "MacBook (Safari)",
             SessionDevicePlatform.Tablet => "планшет",
             SessionDevicePlatform.AndroidPhone => "Android смартфон",
             SessionDevicePlatform.IPhone => "iPhone (Safari)",

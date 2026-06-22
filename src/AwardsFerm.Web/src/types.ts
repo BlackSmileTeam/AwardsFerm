@@ -56,6 +56,7 @@ export type SessionDevicePlatform =
   | 'Native'
   | 'Desktop'
   | 'Laptop'
+  | 'MacBook'
   | 'Tablet'
   | 'AndroidPhone'
   | 'IPhone'
@@ -65,6 +66,7 @@ export const DEVICE_PLATFORM_OPTIONS: { value: SessionDevicePlatform; label: str
   { value: 'Native', label: 'Отсутствует' },
   { value: 'Desktop', label: 'ПК' },
   { value: 'Laptop', label: 'Ноутбук' },
+  { value: 'MacBook', label: 'MacBook' },
   { value: 'Tablet', label: 'Планшет' },
   { value: 'AndroidPhone', label: 'Android смартфон' },
   { value: 'IPhone', label: 'Apple смартфон' },
