@@ -239,6 +239,28 @@ export async function previewClickByProfile(
   }
 }
 
+export async function previewReloadByProfile(profileId: string): Promise<void> {
+  const res = await apiFetch(
+    `/api/sessions/profile/${encodeURIComponent(profileId)}/preview/reload`,
+    { method: 'POST' },
+  )
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Не удалось обновить страницу')
+  }
+}
+
+export async function previewCloseCaptchaTabByProfile(profileId: string): Promise<void> {
+  const res = await apiFetch(
+    `/api/sessions/profile/${encodeURIComponent(profileId)}/preview/close-captcha-tab`,
+    { method: 'POST' },
+  )
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Не удалось закрыть вкладку капчи')
+  }
+}
+
 /** @deprecated используйте resumeSessionByProfile */
 export async function resumeSession(sessionId: string): Promise<void> {
   const res = await apiFetch(`/api/sessions/${sessionId}/resume`, { method: 'POST' })

@@ -189,6 +189,20 @@ public sealed class SessionExecutionService
             yRatio);
     }
 
+    public async Task PreviewReloadAsync(string profileId, CancellationToken cancellationToken = default)
+    {
+        await _remoteInput.ReloadPreviewPageAsync(profileId, cancellationToken);
+        _previewCoordinator.RequestImmediateCapture(profileId);
+        _logger.LogDebug("Profile {ProfileId}: обновление страницы просмотра", profileId);
+    }
+
+    public async Task PreviewCloseCaptchaTabAsync(string profileId, CancellationToken cancellationToken = default)
+    {
+        await _remoteInput.CloseCaptchaTabAsync(profileId, cancellationToken);
+        _previewCoordinator.RequestImmediateCapture(profileId);
+        _logger.LogDebug("Profile {ProfileId}: закрыта вкладка Captcha Verification", profileId);
+    }
+
     private async Task StopExecutionAsync(
         string profileId,
         CancellationToken cancellationToken,

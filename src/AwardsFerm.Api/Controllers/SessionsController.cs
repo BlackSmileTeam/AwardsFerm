@@ -200,6 +200,48 @@ public sealed class SessionsController : ControllerBase
         }
     }
 
+    [HttpPost("profile/{profileId}/preview/reload")]
+    public async Task<IActionResult> PreviewReloadByProfile(string profileId, CancellationToken cancellationToken)
+    {
+        var userId = GetUserId();
+        var adAccountId = await _resolver.ResolveAdAccountByProfileAsync(userId, profileId, cancellationToken);
+        if (adAccountId is null)
+            return NotFound();
+        if (!await _resolver.UserOwnsAccountAsync(userId, adAccountId.Value, cancellationToken))
+            return Forbid();
+
+        try
+        {
+            await _runner.PreviewReloadAsync(profileId, cancellationToken);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    [HttpPost("profile/{profileId}/preview/close-captcha-tab")]
+    public async Task<IActionResult> PreviewCloseCaptchaTabByProfile(string profileId, CancellationToken cancellationToken)
+    {
+        var userId = GetUserId();
+        var adAccountId = await _resolver.ResolveAdAccountByProfileAsync(userId, profileId, cancellationToken);
+        if (adAccountId is null)
+            return NotFound();
+        if (!await _resolver.UserOwnsAccountAsync(userId, adAccountId.Value, cancellationToken))
+            return Forbid();
+
+        try
+        {
+            await _runner.PreviewCloseCaptchaTabAsync(profileId, cancellationToken);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
     [HttpGet("profile/{profileId}/preview/frame")]
     public async Task<IActionResult> GetPreviewFrameByProfile(string profileId, CancellationToken cancellationToken)
     {

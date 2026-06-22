@@ -101,6 +101,38 @@ app.MapGet("/internal/preview/{profileId}/frame", async (
     return frame is null ? Results.NoContent() : Results.Ok(new { imageBase64 = frame });
 });
 
+app.MapPost("/internal/preview/{profileId}/reload", async (
+    string profileId,
+    SessionExecutionService executor,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        await executor.PreviewReloadAsync(profileId, cancellationToken);
+        return Results.NoContent();
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Conflict(ex.Message);
+    }
+});
+
+app.MapPost("/internal/preview/{profileId}/close-captcha-tab", async (
+    string profileId,
+    SessionExecutionService executor,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        await executor.PreviewCloseCaptchaTabAsync(profileId, cancellationToken);
+        return Results.NoContent();
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Conflict(ex.Message);
+    }
+});
+
 app.MapPost("/internal/stop", async (SessionExecutionService executor, CancellationToken cancellationToken) =>
 {
     foreach (var profileId in new[] { "session-001", "session-002", "session-003" })

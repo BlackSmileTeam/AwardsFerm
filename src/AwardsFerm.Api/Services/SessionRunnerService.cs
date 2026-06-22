@@ -165,6 +165,44 @@ public sealed class SessionRunnerService
         }
     }
 
+    public async Task PreviewReloadAsync(string profileId, CancellationToken cancellationToken = default)
+    {
+        if (!await IsWorkerHealthyAsync(cancellationToken))
+            throw new InvalidOperationException("Worker не запущен.");
+
+        var client = _httpClientFactory.CreateClient("worker");
+        var response = await client.PostAsync(
+            $"{GetWorkerBaseUrl()}/internal/preview/{profileId}/reload",
+            null,
+            cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(body) ? "Не удалось обновить страницу." : body);
+        }
+    }
+
+    public async Task PreviewCloseCaptchaTabAsync(string profileId, CancellationToken cancellationToken = default)
+    {
+        if (!await IsWorkerHealthyAsync(cancellationToken))
+            throw new InvalidOperationException("Worker не запущен.");
+
+        var client = _httpClientFactory.CreateClient("worker");
+        var response = await client.PostAsync(
+            $"{GetWorkerBaseUrl()}/internal/preview/{profileId}/close-captcha-tab",
+            null,
+            cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(body) ? "Не удалось закрыть вкладку капчи." : body);
+        }
+    }
+
     public async Task<string?> GetPreviewFrameAsync(string profileId, CancellationToken cancellationToken = default)
     {
         if (!await IsWorkerHealthyAsync(cancellationToken))

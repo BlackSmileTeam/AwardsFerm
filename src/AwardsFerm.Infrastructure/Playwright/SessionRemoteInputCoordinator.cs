@@ -63,6 +63,73 @@ public sealed class SessionRemoteInputCoordinator
         }
     }
 
+    public async Task ReloadPreviewPageAsync(string profileId, CancellationToken cancellationToken = default)
+    {
+        if (!_pageResolvers.TryGetValue(profileId, out var resolver))
+            throw new InvalidOperationException("Сессия не активна — обновление недоступно.");
+
+        var gate = _locks.GetOrAdd(profileId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var page = resolver();
+            if (page is null || page.IsClosed)
+                throw new InvalidOperationException("Страница браузера недоступна.");
+
+            await page.BringToFrontAsync();
+            await page.ReloadAsync(new PageReloadOptions
+            {
+                WaitUntil = WaitUntilState.DOMContentLoaded,
+                Timeout = 45_000
+            });
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    public async Task CloseCaptchaTabAsync(string profileId, CancellationToken cancellationToken = default)
+    {
+        if (!_pageResolvers.TryGetValue(profileId, out var resolver))
+            throw new InvalidOperationException("Сессия не активна — закрытие вкладки недоступно.");
+
+        var gate = _locks.GetOrAdd(profileId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var page = resolver();
+            if (page is null || page.IsClosed)
+                throw new InvalidOperationException("Страница браузера недоступна.");
+
+            var captchaPage = await CaptchaHelper.FindManualCaptchaPageAsync(page.Context);
+            if (captchaPage is null || captchaPage.IsClosed)
+                throw new InvalidOperationException("Вкладка Captcha Verification не найдена.");
+
+            await captchaPage.CloseAsync();
+
+            foreach (var openPage in page.Context.Pages.Where(p => !p.IsClosed))
+            {
+                if (ReferenceEquals(openPage, captchaPage))
+                    continue;
+
+                try
+                {
+                    await openPage.BringToFrontAsync();
+                    break;
+                }
+                catch
+                {
+                    // try next tab
+                }
+            }
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     public async Task<string?> TryCaptureFrameAsync(
         string profileId,
         CancellationToken cancellationToken = default)

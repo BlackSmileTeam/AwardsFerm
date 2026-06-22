@@ -14,6 +14,8 @@ import {
   isHubConnected,
   pauseSessionByProfile,
   previewClickByProfile,
+  previewCloseCaptchaTabByProfile,
+  previewReloadByProfile,
   resumeSessionByProfile,
   setPreviewByProfile,
   fetchPreviewFrame,
@@ -754,6 +756,8 @@ function SessionCard({
   const [menuOpen, setMenuOpen] = useState(false)
   const [clickPending, setClickPending] = useState(false)
   const [clickError, setClickError] = useState<string | null>(null)
+  const [previewActionPending, setPreviewActionPending] = useState(false)
+  const [previewActionError, setPreviewActionError] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewFullscreen, setPreviewFullscreen] = useState(false)
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -914,6 +918,38 @@ function SessionCard({
       window.setTimeout(() => setClickError(null), 4000)
     } finally {
       window.setTimeout(() => setClickPending(false), 400)
+    }
+  }
+
+  const refreshPreviewFrame = async () => {
+    try {
+      const frame = await fetchPreviewFrame(config.profileId)
+      if (frame) onScreenshotUpdate(frame)
+    } catch {
+      /* ignore frame refresh errors */
+    }
+  }
+
+  const runPreviewAction = async (action: 'reload' | 'closeCaptcha') => {
+    if (!isOccupied || previewActionPending) return
+
+    setMenuOpen(false)
+    setPreviewActionPending(true)
+    setPreviewActionError(null)
+    try {
+      if (action === 'reload') {
+        await previewReloadByProfile(config.profileId)
+      } else {
+        await previewCloseCaptchaTabByProfile(config.profileId)
+      }
+      await refreshPreviewFrame()
+    } catch (e) {
+      setPreviewActionError(
+        e instanceof Error ? e.message : 'Не удалось выполнить действие в браузере',
+      )
+      window.setTimeout(() => setPreviewActionError(null), 5000)
+    } finally {
+      setPreviewActionPending(false)
     }
   }
 
@@ -1155,6 +1191,24 @@ function SessionCard({
               </button>
               <button
                 type="button"
+                className="session-menu-item"
+                role="menuitem"
+                disabled={!isOccupied || previewActionPending}
+                onClick={() => void runPreviewAction('reload')}
+              >
+                ↻ Обновить страницу
+              </button>
+              <button
+                type="button"
+                className="session-menu-item"
+                role="menuitem"
+                disabled={!isOccupied || !captchaPending || previewActionPending}
+                onClick={() => void runPreviewAction('closeCaptcha')}
+              >
+                ✕ Закрыть вкладку капчи
+              </button>
+              <button
+                type="button"
                 className="session-menu-item session-menu-item-danger"
                 role="menuitem"
                 disabled={!canDelete || state.loading}
@@ -1178,6 +1232,10 @@ function SessionCard({
       <div className="progress-bar progress-bar-sm">
         <div className="progress-fill" style={{ width: `${progress}%` }} />
       </div>
+
+      {previewActionError && isOccupied ? (
+        <div className="preview-click-error">{previewActionError}</div>
+      ) : null}
 
       {captchaPending && !previewOpen && isOccupied && (
         <div className="captcha-banner">
