@@ -300,19 +300,14 @@ internal static class YandexUiHelper
         if (await IsFullscreenAdVisibleAsync(page))
             return false;
 
-        if (!await IsGuardAcceptedAsync(page))
-            return false;
-
-        if (await IsLoadingScreenAsync(page))
-            return false;
-
-        if (await IsGameLoaderVisibleAsync(page))
-            return false;
-
+        // Canvas/iframe важнее текста «Загрузка» — он может остаться в DOM после старта игры.
         if (await HasLargeCanvasAsync(page.Locator("canvas")))
             return true;
 
         if (await HasLargeGameIframeAsync(page))
+            return true;
+
+        if (await HasGameFrameCanvasAsync(page))
             return true;
 
         foreach (var frame in page.Frames)
@@ -328,6 +323,15 @@ internal static class YandexUiHelper
             }
         }
 
+        if (!await IsGuardAcceptedAsync(page))
+            return false;
+
+        if (await IsLoadingScreenAsync(page))
+            return false;
+
+        if (await IsGameLoaderVisibleAsync(page))
+            return false;
+
         return false;
     }
 
@@ -337,7 +341,7 @@ internal static class YandexUiHelper
     public static async Task WaitForGameFullyLoadedAsync(
         IPage page,
         CancellationToken cancellationToken = default,
-        int maxWaitSeconds = 120,
+        int maxWaitSeconds = 300,
         IBrowserContext? context = null,
         DesktopProfile? profile = null,
         string? sessionId = null,
@@ -351,14 +355,18 @@ internal static class YandexUiHelper
         var deadline = DateTimeOffset.UtcNow.AddSeconds(maxWaitSeconds);
         var sawLoading = false;
         DateTimeOffset? loadingSince = null;
+        DateTimeOffset? emptySince = null;
 
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            await DismissPopupsAsync(page, cancellationToken);
+
             if (reporter is not null && sessionId is not null &&
                 await TryRecoverLoadFailureAsync(page, sessionId, reporter, stuckTracker, cancellationToken))
             {
+                emptySince = null;
                 continue;
             }
 
@@ -367,6 +375,19 @@ internal static class YandexUiHelper
                 await OrientationHelper.EnsureLandscapeForGameAsync(
                     page, context, profile, sessionId, reporter, cancellationToken,
                     landscapeState, stuckTracker);
+            }
+
+            if (await IsPlayGuardDialogVisibleAsync(page))
+            {
+                emptySince = null;
+                if (await ClickPlayGuardButtonAsync(page, cancellationToken)
+                    || await ClickModalPlayButtonAsync(page, cancellationToken))
+                {
+                    await WaitForPlayGuardDismissedAsync(page, cancellationToken);
+                    await HumanBehavior.DelayAsync(1500, 2500, cancellationToken);
+                }
+
+                continue;
             }
 
             if (await IsFullscreenAdVisibleAsync(page))
@@ -394,13 +415,13 @@ internal static class YandexUiHelper
                 sawLoading = true;
                 loadingSince ??= DateTimeOffset.UtcNow;
                 if (loadingSince is not null &&
-                    DateTimeOffset.UtcNow - loadingSince.Value > TimeSpan.FromSeconds(90) &&
+                    DateTimeOffset.UtcNow - loadingSince.Value > TimeSpan.FromSeconds(150) &&
                     reporter is not null && sessionId is not null)
                 {
                     await SessionScreenDiagnostic.TriggerRestartAsync(
                         sessionId,
                         page,
-                        "Загрузка игры длится более 90 секунд",
+                        "Загрузка игры длится более 150 секунд",
                         reporter,
                         cancellationToken);
                 }
@@ -410,6 +431,52 @@ internal static class YandexUiHelper
             }
 
             loadingSince = null;
+
+            if (!await IsGameRunningAsync(page) &&
+                !await IsEntryBarrierVisibleAsync(page) &&
+                await IsStuckEmptyScreenAsync(page))
+            {
+                emptySince ??= DateTimeOffset.UtcNow;
+                if (emptySince is not null &&
+                    DateTimeOffset.UtcNow - emptySince.Value > TimeSpan.FromSeconds(45) &&
+                    reporter is not null && sessionId is not null)
+                {
+                    if (await SessionNavigationHelper.IsCdnGameFrameBrokenAsync(page))
+                    {
+                        await reporter.ReportAsync(new SessionEvent
+                        {
+                            SessionId = sessionId,
+                            Type = SessionEventType.Log,
+                            Message = "Пустой экран — CDN iframe не поднялся, перезагружаем…"
+                        }, cancellationToken);
+
+                        if (await SessionNavigationHelper.TryReloadCdnGameFrameAsync(page, cancellationToken))
+                        {
+                            emptySince = null;
+                            await HumanBehavior.DelayAsync(2500, 4000, cancellationToken);
+                            continue;
+                        }
+                    }
+
+                    if (await TryRecoverLoadFailureAsync(page, sessionId, reporter, stuckTracker, cancellationToken))
+                    {
+                        emptySince = null;
+                        continue;
+                    }
+
+                    if (await ClickModalPlayButtonAsync(page, cancellationToken)
+                        || await ClickPlayButtonViaJavaScriptAsync(page, cancellationToken))
+                    {
+                        emptySince = null;
+                        await HumanBehavior.DelayAsync(2000, 3500, cancellationToken);
+                        continue;
+                    }
+                }
+            }
+            else
+            {
+                emptySince = null;
+            }
 
             if (await IsGameRunningAsync(page) && !await IsGameLoadErrorVisibleAsync(page))
             {
@@ -1404,41 +1471,93 @@ internal static class YandexUiHelper
         for (var i = 0; i < count; i++)
         {
             var canvas = canvasLocator.Nth(i);
-            if (!await canvas.IsVisibleAsync())
-                continue;
-
             var box = await canvas.BoundingBoxAsync();
-            if (box is { Width: >= 200, Height: >= 150 })
+            if (box is { Width: >= 150, Height: >= 100 })
                 return true;
         }
 
         return false;
     }
 
+    private static async Task<bool> HasGameFrameCanvasAsync(IPage page)
+    {
+        try
+        {
+            var frame = page.FrameLocator("#game-frame");
+            var canvas = frame.Locator("canvas").First;
+            if (await canvas.CountAsync() == 0)
+                return false;
+
+            var box = await canvas.BoundingBoxAsync();
+            return box is { Width: >= 150, Height: >= 100 };
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static async Task<bool> HasLargeGameIframeAsync(IPage page)
     {
         var gameFrame = page.Locator("#game-frame");
-        if (await gameFrame.CountAsync() > 0 && await gameFrame.First.IsVisibleAsync())
+        if (await gameFrame.CountAsync() > 0)
         {
             var box = await gameFrame.First.BoundingBoxAsync();
-            if (box is { Width: >= 400, Height: >= 300 })
+            if (box is { Width: >= 280, Height: >= 200 })
                 return true;
         }
 
-        var iframes = page.Locator("iframe");
+        var iframes = page.Locator("iframe[src*='cdn.games.yandex.net'], iframe#game-frame");
         var count = await iframes.CountAsync();
         for (var i = 0; i < count; i++)
         {
             var iframe = iframes.Nth(i);
-            if (!await iframe.IsVisibleAsync())
-                continue;
-
             var box = await iframe.BoundingBoxAsync();
-            if (box is { Width: >= 400, Height: >= 300 })
+            if (box is { Width: >= 280, Height: >= 200 })
                 return true;
         }
 
         return false;
+    }
+
+    private static async Task<bool> IsStuckEmptyScreenAsync(IPage page)
+    {
+        if (page.IsClosed)
+            return false;
+
+        try
+        {
+            return await page.EvaluateAsync<bool>(
+                """
+                () => {
+                    const body = document.body?.innerText?.trim() ?? '';
+                    if (body.length > 120) return false;
+
+                    const large = (el) => {
+                        const r = el.getBoundingClientRect();
+                        return r.width >= 150 && r.height >= 100;
+                    };
+
+                    for (const c of document.querySelectorAll('canvas')) {
+                        if (large(c)) return false;
+                    }
+
+                    for (const iframe of document.querySelectorAll('iframe')) {
+                        const r = iframe.getBoundingClientRect();
+                        if (r.width >= 280 && r.height >= 200) return false;
+                    }
+
+                    const loader = document.querySelector('.game-loader:not(.game-loader_hidden)');
+                    if (loader && loader.offsetParent !== null) return false;
+
+                    return true;
+                }
+                """);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static async Task<IPage> ReacquireGamePageAsync(
@@ -1531,16 +1650,25 @@ internal static class YandexUiHelper
     [
         "#search-input",
         "input[data-testid='search-text-input']",
+        "input[data-testid='search-input']",
         "input[type='search']",
+        "input[name='search']",
         "input[placeholder*='Найти игру']",
+        "input[placeholder*='Найти']",
         "input[placeholder*='Поиск']",
+        "input[placeholder*='поиск']",
+        "input[placeholder*='Искать']",
         "input[aria-label*='Поиск']",
-        ".search-input input"
+        "input[aria-label*='поиск']",
+        "[class*='Search'] input",
+        "[class*='search'] input[type='text']",
+        ".search-input input",
+        "header input[type='text']"
     ];
 
     public static async Task FocusSearchInputAsync(IPage page, CancellationToken cancellationToken)
     {
-        var input = await FindSearchInputLocatorAsync(page);
+        var input = await FindSearchInputLocatorAsync(page, cancellationToken);
         try
         {
             await input.FocusAsync(new LocatorFocusOptions { Timeout = 10_000 });
@@ -1555,7 +1683,7 @@ internal static class YandexUiHelper
 
     public static async Task<bool> FillSearchQueryAsync(IPage page, string query, CancellationToken cancellationToken)
     {
-        var input = await FindSearchInputLocatorAsync(page);
+        var input = await FindSearchInputLocatorAsync(page, cancellationToken);
         try
         {
             await input.ClickAsync(new LocatorClickOptions { Force = true, Timeout = 5000 });
@@ -1583,13 +1711,43 @@ internal static class YandexUiHelper
         }
     }
 
-    private static async Task<ILocator> FindSearchInputLocatorAsync(IPage page)
+    private static async Task<ILocator> FindSearchInputLocatorAsync(
+        IPage page,
+        CancellationToken cancellationToken = default)
     {
-        foreach (var selector in SearchInputSelectors)
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(35);
+
+        while (DateTimeOffset.UtcNow < deadline)
         {
-            var locator = page.Locator(selector).First;
-            if (await locator.CountAsync() > 0 && await locator.IsVisibleAsync())
-                return locator;
+            cancellationToken.ThrowIfCancellationRequested();
+            await DismissPopupsAsync(page, cancellationToken);
+
+            foreach (var selector in SearchInputSelectors)
+            {
+                try
+                {
+                    var locator = page.Locator(selector).First;
+                    if (await locator.CountAsync() > 0 && await locator.IsVisibleAsync())
+                        return locator;
+                }
+                catch
+                {
+                    // try next selector
+                }
+            }
+
+            try
+            {
+                var byRole = page.GetByRole(AriaRole.Searchbox).First;
+                if (await byRole.CountAsync() > 0 && await byRole.IsVisibleAsync())
+                    return byRole;
+            }
+            catch
+            {
+                // ignore
+            }
+
+            await Task.Delay(800, cancellationToken);
         }
 
         throw new InvalidOperationException("Строка поиска на Яндекс Играх не найдена.");

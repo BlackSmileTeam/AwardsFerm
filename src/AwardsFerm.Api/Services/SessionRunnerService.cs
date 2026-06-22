@@ -41,6 +41,8 @@ public sealed class SessionRunnerService
                 "dotnet run --project src\\AwardsFerm.Worker\\AwardsFerm.Worker.csproj");
         }
 
+        await StopProfileAsync(profileId, cancellationToken);
+
         var sessionId = Guid.NewGuid().ToString("N");
         var workerUrl = GetWorkerBaseUrl();
         var payload = new WorkerRunRequest
@@ -92,7 +94,7 @@ public sealed class SessionRunnerService
             _sessionManager.StopByProfileId(profileId);
 
         if (await IsWorkerHealthyAsync(cancellationToken))
-            await EnsureWorkerStoppedAsync(profileId, useLongTimeout: true, cancellationToken);
+            await EnsureWorkerStoppedAsync(profileId, useLongTimeout: false, cancellationToken);
     }
 
     public async Task PauseProfileAsync(string profileId, CancellationToken cancellationToken = default)

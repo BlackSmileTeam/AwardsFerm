@@ -649,6 +649,8 @@ internal static class SlitherGamePlayHelper
 
     private static async Task<bool> TryClickInGameMenuPlayAsync(IPage page, CancellationToken cancellationToken)
     {
+        await YandexUiHelper.DismissFullscreenAdIfVisibleAsync(page, cancellationToken);
+
         var frame = GetGameFrame(page);
         if (frame is not null && await TryClickInFrameAsync(page, frame, InGamePlaySelectors, "Играть", cancellationToken))
             return true;

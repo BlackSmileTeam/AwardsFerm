@@ -58,6 +58,14 @@ public sealed class SessionExecutionService
             await StopExecutionAsync(request.ProfileId, cancellationToken, StartStopWaitTimeout);
 
             if (IsProfileRunning(request.ProfileId))
+            {
+                if (_byProfile.TryGetValue(request.ProfileId, out var stuck))
+                    stuck.Cts.Cancel();
+
+                await StopExecutionAsync(request.ProfileId, cancellationToken, StopWaitTimeout);
+            }
+
+            if (IsProfileRunning(request.ProfileId))
                 throw new InvalidOperationException($"Профиль {request.ProfileId} уже выполняется.");
 
             var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -95,7 +103,8 @@ public sealed class SessionExecutionService
         if (!_byProfile.TryGetValue(profileId, out var execution))
             return Task.CompletedTask;
 
-        execution.Cts.Cancel();
+        var stoppedExecution = execution;
+        stoppedExecution.Cts.Cancel();
 
         var gate = _locks.GetOrAdd(profileId, _ => new SemaphoreSlim(1, 1));
         _ = Task.Run(async () =>
@@ -103,7 +112,11 @@ public sealed class SessionExecutionService
             await gate.WaitAsync(CancellationToken.None);
             try
             {
-                await StopExecutionAsync(profileId, CancellationToken.None, StopWaitTimeout);
+                if (_byProfile.TryGetValue(profileId, out var current)
+                    && ReferenceEquals(current, stoppedExecution))
+                {
+                    await StopExecutionAsync(profileId, CancellationToken.None, StopWaitTimeout);
+                }
             }
             catch (Exception ex)
             {

@@ -29,20 +29,14 @@ internal static class DeviceFingerprintRotator
         ("Google Inc. (Intel)", "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)")
     ];
 
-    private static readonly (string Model, string Android, int W, int H, double Dpr)[] TabletModels =
+    private static readonly (string Vendor, string Renderer)[] DesktopGpus =
     [
-        ("SM-X910", "14", 1366, 1024, 2),
-        ("Lenovo TB-J606F", "13", 1280, 800, 1.5),
-        ("SM-T970", "13", 1024, 768, 2),
-        ("21051182G", "12", 1180, 820, 1.5)
-    ];
-
-    private static readonly (string Vendor, string Renderer)[] MobileGpus =
-    [
-        ("Qualcomm", "Adreno (TM) 740"),
-        ("Qualcomm", "Adreno (TM) 730"),
-        ("ARM", "Mali-G715"),
-        ("Google Inc. (Qualcomm)", "ANGLE (Qualcomm, Adreno (TM) 740, OpenGL ES 3.2)")
+        ("NVIDIA Corporation", "NVIDIA GeForce RTX 4070/PCIe/SSE2"),
+        ("NVIDIA Corporation", "NVIDIA GeForce RTX 3070/PCIe/SSE2"),
+        ("NVIDIA Corporation", "NVIDIA GeForce GTX 1660 Ti/PCIe/SSE2"),
+        ("AMD", "AMD Radeon RX 6700 XT"),
+        ("Intel Inc.", "Intel(R) UHD Graphics 770"),
+        ("Google Inc. (NVIDIA)", "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)")
     ];
 
     /// <summary>Случайный отпечаток устройства на каждый запуск сессии (базовый профиль не перезаписывается).</summary>
@@ -118,11 +112,35 @@ internal static class DeviceFingerprintRotator
     {
         _ = chromeMajor;
         _ = chromeBuild;
-        return Random.Next(100) switch
+        return Random.Next(2) == 0 ? PickDesktop() : PickLaptop();
+    }
+
+    private static DeviceTemplate PickDesktop()
+    {
+        var gpu = DesktopGpus[Random.Next(DesktopGpus.Length)];
+        var cores = new[] { 6, 8, 12, 16, 24 }[Random.Next(5)];
+        var memory = new[] { 8, 16, 32 }[Random.Next(3)];
+        var (width, height) = new (int, int)[]
         {
-            < 55 => PickLaptop(),
-            _ => PickTablet()
-        };
+            (1920, 1080),
+            (2560, 1440),
+            (1920, 1200),
+            (1680, 1050),
+            (1600, 900)
+        }[Random.Next(5)];
+
+        return new DeviceTemplate(
+            DeviceFormFactor.Desktop,
+            width,
+            height,
+            1,
+            cores,
+            memory,
+            "Win32",
+            0,
+            gpu.Vendor,
+            gpu.Renderer,
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{0}.0.{1}.0 Safari/537.36");
     }
 
     private static DeviceTemplate PickLaptop()
@@ -153,24 +171,6 @@ internal static class DeviceFingerprintRotator
             gpu.Vendor,
             gpu.Renderer,
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{0}.0.{1}.0 Safari/537.36");
-    }
-
-    private static DeviceTemplate PickTablet()
-    {
-        var tablet = TabletModels[Random.Next(TabletModels.Length)];
-        var gpu = MobileGpus[Random.Next(MobileGpus.Length)];
-        return new DeviceTemplate(
-            DeviceFormFactor.Tablet,
-            tablet.W,
-            tablet.H,
-            tablet.Dpr,
-            8,
-            8,
-            "Linux armv8l",
-            10,
-            gpu.Vendor,
-            gpu.Renderer,
-            $"Mozilla/5.0 (Linux; Android {tablet.Android}; {tablet.Model}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{{0}}.0.{{1}}.0 Safari/537.36");
     }
 
     public static void PruneOldBrowserInstances(string profilesRoot, string profileId, int keep = 3)
@@ -217,11 +217,7 @@ internal static class DeviceFingerprintRotator
                 ? $"прокси: {MaskProxy(profile.ProxyUrl)} (IP уточняется после старта)"
                 : "IP: ваш реальный (для смены — proxies.txt)";
 
-        var deviceLabel = profile.FormFactor switch
-        {
-            DeviceFormFactor.Tablet => "планшет",
-            _ => "ноутбук"
-        };
+        var deviceLabel = profile.ViewportWidth >= 1600 ? "компьютер" : "ноутбук";
 
         return $"ID: {profile.SessionDeviceId[..8]}…, {ipPart}, " +
                $"локация: {SessionLocationHelper.Format(profile)}, " +

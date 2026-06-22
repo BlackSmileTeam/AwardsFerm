@@ -64,6 +64,8 @@ export function SessionsPanel() {
   const sessionCardRefs = useRef<Record<string, HTMLElement | null>>({})
 
   const sessionIdToProfile = useRef<Record<string, string>>({})
+  const stopPromisesRef = useRef<Record<string, Promise<void>>>({})
+  const locallyStoppedUntilRef = useRef<Record<string, number>>({})
   const confirmResolverRef = useRef<((value: boolean) => void) | null>(null)
   const slotConfigsRef = useRef(slotConfigs)
   const slotsRef = useRef(slots)
@@ -130,9 +132,18 @@ export function SessionsPanel() {
       }
 
       if (event.type === 'StatusChanged' && event.status) {
+        const status = normalizeStatus(event.status)
+        const terminal = status === 'Stopped' || status === 'Completed' || status === 'Failed'
+        const locallyStopped = (locallyStoppedUntilRef.current[profileId] ?? 0) > Date.now()
         next = {
           ...next,
-          session: next.session ? { ...next.session, status: normalizeStatus(event.status) } : next.session,
+          loading: terminal ? false : next.loading,
+          session:
+            terminal || locallyStopped
+              ? null
+              : next.session
+                ? { ...next.session, status }
+                : next.session,
         }
       }
 
@@ -157,14 +168,18 @@ export function SessionsPanel() {
       }
 
       if (event.type === 'Completed') {
+        const keepRunning = Boolean(next.session?.autoRestart)
         next = {
           ...next,
+          loading: false,
           session: next.session
-            ? {
-                ...next.session,
-                status: next.session.autoRestart ? 'Running' : 'Completed',
-                finishedAt: next.session.autoRestart ? undefined : new Date().toISOString(),
-              }
+            ? keepRunning
+              ? { ...next.session, status: 'Running' as const }
+              : {
+                  ...next.session,
+                  status: 'Completed' as const,
+                  finishedAt: new Date().toISOString(),
+                }
             : next.session,
           logs: [
             ...next.logs,
@@ -251,23 +266,24 @@ export function SessionsPanel() {
         const active = forProfile.find(
           (s) => s.status === 'Starting' || s.status === 'Running' || s.status === 'Paused',
         )
-        const latest = forProfile.reduce<typeof sessions[number] | undefined>((best, s) => {
-          if (!best) return s
-          const bestTs = best.startedAt ? Date.parse(best.startedAt) : 0
-          const sTs = s.startedAt ? Date.parse(s.startedAt) : 0
-          return sTs >= bestTs ? s : best
-        }, undefined)
-        const display = active ?? latest
-        if (display) {
-          sessionIdToProfile.current[display.id] = cfg.profileId
+        const locallyStopped = (locallyStoppedUntilRef.current[cfg.profileId] ?? 0) > Date.now()
+        if (active && !locallyStopped) {
+          sessionIdToProfile.current[active.id] = cfg.profileId
           next[cfg.profileId] = {
             ...next[cfg.profileId],
-            session: display,
-            logs: display.logs.length > 0 ? display.logs : next[cfg.profileId]?.logs ?? [],
+            session: active,
+            loading: false,
+            logs: active.logs.length > 0 ? active.logs : next[cfg.profileId]?.logs ?? [],
             diagnosticLogs:
-              display.diagnosticLogs?.length > 0
-                ? display.diagnosticLogs
+              active.diagnosticLogs?.length > 0
+                ? active.diagnosticLogs
                 : next[cfg.profileId]?.diagnosticLogs ?? [],
+          }
+        } else {
+          next[cfg.profileId] = {
+            ...next[cfg.profileId],
+            session: null,
+            loading: false,
           }
         }
       }
@@ -325,7 +341,17 @@ export function SessionsPanel() {
       return
     }
 
+    const pendingStop = stopPromisesRef.current[profileId]
+    if (pendingStop) {
+      try {
+        await pendingStop
+      } catch {
+        /* stop failed — still try start; API will ensure clean state */
+      }
+    }
+
     const slot = slotConfigs.find((s) => s.profileId === profileId)
+    delete locallyStoppedUntilRef.current[profileId]
     setSlots((prev) => ({ ...prev, [profileId]: { ...prev[profileId], loading: true } }))
     setNotice(null)
 
@@ -349,26 +375,49 @@ export function SessionsPanel() {
       }))
     } catch (e) {
       setNotice({ kind: 'error', text: e instanceof Error ? e.message : 'Ошибка запуска' })
+    } finally {
       setSlots((prev) => ({ ...prev, [profileId]: { ...prev[profileId], loading: false } }))
     }
   }
 
   const onStop = async (profileId: string) => {
-    setSlots((prev) => ({ ...prev, [profileId]: { ...prev[profileId], loading: true } }))
+    onPreviewClose(profileId)
     setNotice(null)
-    try {
-      await stopSessionByProfile(profileId)
-      const session = slots[profileId]?.session
+    locallyStoppedUntilRef.current[profileId] = Date.now() + 30_000
+
+    setSlots((prev) => {
+      const slot = prev[profileId]
+      const session = slot?.session
       if (session) delete sessionIdToProfile.current[session.id]
-      if (selectedAccountId) await syncSlotsWithSessions(selectedAccountId)
-      setSlots((prev) => ({
+      return {
         ...prev,
-        [profileId]: { session: null, logs: prev[profileId]?.logs ?? [], loading: false },
-      }))
-    } catch (e) {
-      setNotice({ kind: 'error', text: e instanceof Error ? e.message : 'Ошибка остановки' })
-      setSlots((prev) => ({ ...prev, [profileId]: { ...prev[profileId], loading: false } }))
-    }
+        [profileId]: {
+          ...slot,
+          session: null,
+          loading: false,
+          screenshotBase64: null,
+          logs: [
+            ...(slot?.logs ?? []),
+            `[${formatTime(new Date().toISOString())}] Остановка сессии…`,
+          ],
+          diagnosticLogs: slot?.diagnosticLogs ?? [],
+        },
+      }
+    })
+
+    const stopTask = stopSessionByProfile(profileId)
+      .catch((e: unknown) => {
+        delete locallyStoppedUntilRef.current[profileId]
+        setNotice({ kind: 'error', text: e instanceof Error ? e.message : 'Ошибка остановки' })
+        if (selectedAccountRef.current) void syncSlotsWithSessions(selectedAccountRef.current)
+        throw e
+      })
+      .finally(() => {
+        delete stopPromisesRef.current[profileId]
+      })
+
+    stopPromisesRef.current[profileId] = stopTask
+    void stopTask
   }
 
   const onPause = async (profileId: string) => {
@@ -383,11 +432,11 @@ export function SessionsPanel() {
             ? { ...prev[profileId].session!, status: 'Paused' }
             : null,
           logs: [...(prev[profileId]?.logs ?? []), `[${formatTime(new Date().toISOString())}] Пауза`],
-          loading: false,
         },
       }))
     } catch (e) {
       setNotice({ kind: 'error', text: e instanceof Error ? e.message : 'Ошибка паузы' })
+    } finally {
       setSlots((prev) => ({ ...prev, [profileId]: { ...prev[profileId], loading: false } }))
     }
   }
@@ -404,11 +453,11 @@ export function SessionsPanel() {
             ? { ...prev[profileId].session!, status: 'Running' }
             : null,
           logs: [...(prev[profileId]?.logs ?? []), `[${formatTime(new Date().toISOString())}] Продолжение`],
-          loading: false,
         },
       }))
     } catch (e) {
       setNotice({ kind: 'error', text: e instanceof Error ? e.message : 'Ошибка продолжения' })
+    } finally {
       setSlots((prev) => ({ ...prev, [profileId]: { ...prev[profileId], loading: false } }))
     }
   }

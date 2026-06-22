@@ -327,7 +327,24 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                 page = activePage!.Resolve();
                 await CaptchaHelper.WaitForManualSolveAsync(page, sessionId, _eventReporter, sessionCt);
                 await YandexUiHelper.DismissPopupsAsync(page, sessionCt);
-                await YandexUiHelper.FocusSearchInputAsync(page, sessionCt);
+
+                try
+                {
+                    await YandexUiHelper.FocusSearchInputAsync(page, sessionCt);
+                }
+                catch (InvalidOperationException)
+                {
+                    var searchUrl =
+                        $"https://yandex.ru/games/search?query={Uri.EscapeDataString(options.SearchQuery)}";
+                    await ReportLogAsync(sessionId, "Строка поиска не найдена — открываем поиск по URL", sessionCt);
+                    await SessionNavigationHelper.GotoWithRetryAsync(
+                        page,
+                        searchUrl,
+                        sessionCt,
+                        captchaSessionId: sessionId,
+                        captchaReporter: _eventReporter);
+                    await HumanBehavior.DelayAsync(2000, 3500, sessionCt);
+                }
             });
 
             await RunStepAsync(sessionId, profile.Id, 6, $"Ввод запроса «{options.SearchQuery}»", activity, sessionCt, async () =>
