@@ -81,6 +81,8 @@ internal static class SlitherGamePlayHelper
         {
             await LogAsync(sessionId, reporter, "Нажата кнопка «Играть» в меню игры", cancellationToken);
             await HumanBehavior.DelayAsync(2000, 3500, cancellationToken);
+            await OrientationHelper.EnsureLandscapeForGameAsync(
+                page, context, deviceProfile, sessionId, reporter, cancellationToken, landscapeState, stuckTracker);
         }
 
         landscapeState ??= new LandscapeState { Applied = true };
@@ -116,7 +118,7 @@ internal static class SlitherGamePlayHelper
             {
                 var (rotate, _, count) = await ProcessGameOverAsync(
                     context, page, profileId, sessionId, reporter, pauseCoordinator, activePage,
-                    gameOverCount, gameOverAdState, cancellationToken);
+                    gameOverCount, gameOverAdState, deviceProfile, landscapeState, stuckTracker, cancellationToken);
                 gameOverCount = count;
                 if (rotate is not null)
                     return rotate;
@@ -159,12 +161,13 @@ internal static class SlitherGamePlayHelper
 
             var chunkSeconds = Random.Next(20, 35);
             var stoppedByGameOver = await SlitherChunkAsync(
-                context, page, profileId, chunkSeconds, sessionId, reporter, pauseCoordinator, activePage, cancellationToken);
+                context, page, profileId, chunkSeconds, sessionId, reporter, pauseCoordinator, activePage,
+                deviceProfile, landscapeState, stuckTracker, cancellationToken);
             if (stoppedByGameOver)
             {
                 var (rotate, _, count) = await ProcessGameOverAsync(
                     context, page, profileId, sessionId, reporter, pauseCoordinator, activePage,
-                    gameOverCount, gameOverAdState, cancellationToken);
+                    gameOverCount, gameOverAdState, deviceProfile, landscapeState, stuckTracker, cancellationToken);
                 gameOverCount = count;
                 if (rotate is not null)
                     return rotate;
@@ -185,6 +188,9 @@ internal static class SlitherGamePlayHelper
         ActivePageHolder? activePage,
         int gameOverCount,
         GameOverAdState gameOverAdState,
+        DesktopProfile? deviceProfile,
+        LandscapeState? landscapeState,
+        SessionStuckTracker? stuckTracker,
         CancellationToken cancellationToken)
     {
         gameOverCount++;
@@ -192,7 +198,7 @@ internal static class SlitherGamePlayHelper
 
         var adShown = await HandleGameOverCycleAsync(
             context, page, profileId, sessionId, reporter, pauseCoordinator, activePage,
-            gameOverAdState, cancellationToken);
+            gameOverAdState, deviceProfile, landscapeState, stuckTracker, cancellationToken);
         if (page.IsClosed)
             throw new PlaywrightException("Target closed");
 
@@ -216,6 +222,9 @@ internal static class SlitherGamePlayHelper
         ISessionPauseCoordinator pauseCoordinator,
         ActivePageHolder? activePage,
         GameOverAdState adState,
+        DesktopProfile? deviceProfile,
+        LandscapeState? landscapeState,
+        SessionStuckTracker? stuckTracker,
         CancellationToken cancellationToken)
     {
         adState.SinceAd++;
@@ -266,6 +275,8 @@ internal static class SlitherGamePlayHelper
         {
             await LogAsync(sessionId, reporter, "Нажато «Играть снова»", cancellationToken);
             await HumanBehavior.DelayAsync(2000, 3500, cancellationToken);
+            await OrientationHelper.EnsureLandscapeForGameAsync(
+                page, context, deviceProfile, sessionId, reporter, cancellationToken, landscapeState, stuckTracker);
             return adShown;
         }
 
@@ -273,6 +284,8 @@ internal static class SlitherGamePlayHelper
         {
             await LogAsync(sessionId, reporter, "Нажато «Играть» в меню", cancellationToken);
             await HumanBehavior.DelayAsync(2000, 3500, cancellationToken);
+            await OrientationHelper.EnsureLandscapeForGameAsync(
+                page, context, deviceProfile, sessionId, reporter, cancellationToken, landscapeState, stuckTracker);
         }
 
         return adShown;
@@ -287,6 +300,9 @@ internal static class SlitherGamePlayHelper
         ISessionEventReporter reporter,
         ISessionPauseCoordinator pauseCoordinator,
         ActivePageHolder? activePage,
+        DesktopProfile? deviceProfile,
+        LandscapeState? landscapeState,
+        SessionStuckTracker? stuckTracker,
         CancellationToken cancellationToken)
     {
         var deadline = DateTimeOffset.UtcNow.AddSeconds(seconds);
@@ -303,6 +319,9 @@ internal static class SlitherGamePlayHelper
             {
                 await CaptchaHelper.BlockWhileCaptchaOpenAsync(
                     context, page, profileId, sessionId, reporter, pauseCoordinator, activePage, cancellationToken);
+
+                await OrientationHelper.EnsureLandscapeForGameAsync(
+                    page, context, deviceProfile, sessionId, reporter, cancellationToken, landscapeState, stuckTracker);
 
                 if (await IsGameOverVisibleAsync(page))
                     return true;

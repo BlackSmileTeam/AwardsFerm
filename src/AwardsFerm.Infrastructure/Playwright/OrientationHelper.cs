@@ -6,10 +6,34 @@ using Microsoft.Playwright;
 namespace AwardsFerm.Infrastructure.Playwright;
 
 /// <summary>
-/// Ориентация экрана для Яндекс Игр: игра может требовать портрет или альбом.
+/// Ориентация экрана для Яндекс Игр: «Поверните устройство», вертикальная/горизонтальная.
 /// </summary>
 internal static class OrientationHelper
 {
+    private static readonly string[] RotatePromptMarkers =
+    [
+        "Поверните устройство",
+        "Rotate your device",
+        "Turn your device"
+    ];
+
+    private static readonly string[] PortraitMarkers =
+    [
+        "вертикальн",
+        "только в вертикальной",
+        "вертикальной ориентации",
+        "portrait",
+        "vertical orientation"
+    ];
+
+    private static readonly string[] LandscapeMarkers =
+    [
+        "альбомн",
+        "горизонтальн",
+        "landscape",
+        "horizontal orientation"
+    ];
+
     public static async Task EnsureLandscapeForGameAsync(
         IPage page,
         IBrowserContext context,
@@ -20,6 +44,7 @@ internal static class OrientationHelper
         LandscapeState? landscapeState = null,
         SessionStuckTracker? stuckTracker = null)
     {
+        _ = landscapeState;
         if (page.IsClosed)
             return;
 
@@ -70,122 +95,94 @@ internal static class OrientationHelper
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var rotatePromptVisible = await IsRotateDevicePromptVisibleAsync(page);
-        if (!rotatePromptVisible)
+        var pageText = await CollectVisibleTextAsync(page);
+        if (!ContainsRotatePrompt(pageText))
             return null;
 
-        var portraitHint = await HasPortraitOrientationHintAsync(page);
-        if (portraitHint)
+        if (ContainsAny(pageText, PortraitMarkers))
             return ScreenOrientation.Portrait;
 
-        var landscapeHint = await HasLandscapeOrientationHintAsync(page);
-        if (landscapeHint)
+        if (ContainsAny(pageText, LandscapeMarkers))
             return ScreenOrientation.Landscape;
 
-        // «Поверните устройство» без явной подсказки — чаще требуется портрет (мобильные игры на десктопе).
+        // «Поверните устройство» без уточнения — по умолчанию портрет (типичный кейс мобильных игр).
         return ScreenOrientation.Portrait;
     }
 
-    private static async Task<bool> IsRotateDevicePromptVisibleAsync(IPage page)
-    {
-        foreach (var frame in page.Frames)
-        {
-            try
-            {
-                var rotate = frame.GetByText("Поверните устройство", new() { Exact = false });
-                if (await rotate.First.IsVisibleAsync())
-                    return true;
-            }
-            catch
-            {
-                // ignore
-            }
-        }
-
-        try
-        {
-            var rotate = page.GetByText("Поверните устройство", new() { Exact = false });
-            return await rotate.First.IsVisibleAsync();
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static async Task<bool> HasPortraitOrientationHintAsync(IPage page)
-    {
-        foreach (var frame in page.Frames)
-        {
-            try
-            {
-                var body = await frame.Locator("body").InnerTextAsync();
-                if (ContainsPortraitHint(body))
-                    return true;
-            }
-            catch
-            {
-                // ignore
-            }
-        }
-
-        try
-        {
-            var body = await page.Locator("body").InnerTextAsync();
-            return ContainsPortraitHint(body);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static bool ContainsPortraitHint(string? text)
+    private static bool ContainsRotatePrompt(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))
             return false;
 
-        var lower = text.ToLowerInvariant();
-        return lower.Contains("вертикаль", StringComparison.Ordinal) ||
-               lower.Contains("portrait", StringComparison.Ordinal);
+        return ContainsAny(text, RotatePromptMarkers) ||
+               ContainsAny(text, PortraitMarkers) ||
+               ContainsAny(text, LandscapeMarkers);
     }
 
-    private static async Task<bool> HasLandscapeOrientationHintAsync(IPage page)
+    private static async Task<string> CollectVisibleTextAsync(IPage page)
     {
+        var parts = new List<string>();
+
         foreach (var frame in page.Frames)
         {
             try
             {
-                var body = await frame.Locator("body").InnerTextAsync();
-                if (ContainsLandscapeHint(body))
-                    return true;
+                var chunk = await frame.EvaluateAsync<string>(
+                    """
+                    () => {
+                      const parts = [];
+                      const visit = (root) => {
+                        if (!root) return;
+                        try {
+                          const text = root.innerText || root.textContent || '';
+                          if (text.trim()) parts.push(text);
+                        } catch { /* ignore */ }
+                        const nodes = root.querySelectorAll
+                          ? root.querySelectorAll('[class*="rotate"], [class*="orientation"], [class*="portrait"], [class*="landscape"], p, h1, h2, h3, span, div')
+                          : [];
+                        for (const node of nodes) {
+                          if (node.offsetParent === null && node !== document.body) continue;
+                          const t = (node.innerText || node.textContent || '').trim();
+                          if (t.length >= 8) parts.push(t);
+                        }
+                      };
+                      visit(document.body);
+                      return parts.join('\n');
+                    }
+                    """);
+                if (!string.IsNullOrWhiteSpace(chunk))
+                    parts.Add(chunk);
             }
             catch
             {
-                // ignore
+                // ignore frame errors
             }
         }
 
         try
         {
-            var body = await page.Locator("body").InnerTextAsync();
-            return ContainsLandscapeHint(body);
+            var title = await page.TitleAsync();
+            if (!string.IsNullOrWhiteSpace(title))
+                parts.Add(title);
         }
         catch
         {
-            return false;
+            // ignore
         }
+
+        return string.Join('\n', parts);
     }
 
-    private static bool ContainsLandscapeHint(string? text)
+    private static bool ContainsAny(string text, IEnumerable<string> markers)
     {
-        if (string.IsNullOrWhiteSpace(text))
-            return false;
-
         var lower = text.ToLowerInvariant();
-        return lower.Contains("альбом", StringComparison.Ordinal) ||
-               lower.Contains("landscape", StringComparison.Ordinal) ||
-               lower.Contains("горизонталь", StringComparison.Ordinal);
+        foreach (var marker in markers)
+        {
+            if (lower.Contains(marker, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 
     private static async Task ApplyOrientationAsync(
@@ -201,12 +198,15 @@ internal static class OrientationHelper
         if (vp is null)
             return;
 
+        var baseW = profile?.ViewportWidth > 0 ? profile.ViewportWidth : Math.Max(vp.Width, vp.Height);
+        var baseH = profile?.ViewportHeight > 0 ? profile.ViewportHeight : Math.Min(vp.Width, vp.Height);
+
         var targetW = orientation == ScreenOrientation.Landscape
-            ? Math.Max(vp.Width, vp.Height)
-            : Math.Min(vp.Width, vp.Height);
+            ? Math.Max(baseW, baseH)
+            : Math.Min(baseW, baseH);
         var targetH = orientation == ScreenOrientation.Landscape
-            ? Math.Min(vp.Width, vp.Height)
-            : Math.Max(vp.Width, vp.Height);
+            ? Math.Min(baseW, baseH)
+            : Math.Max(baseW, baseH);
 
         if (vp.Width == targetW && vp.Height == targetH)
             return;
@@ -216,10 +216,16 @@ internal static class OrientationHelper
         {
             SessionId = sessionId,
             Type = SessionEventType.Log,
-            Message = $"Повёрнут экран в {label} ориентацию ({targetW}×{targetH})"
+            Message = $"Сообщение «Поверните устройство» — поворачиваем экран в {label} ориентацию ({targetW}×{targetH})"
         }, cancellationToken);
 
         await page.SetViewportSizeAsync(targetW, targetH);
+
+        if (profile is not null)
+        {
+            profile.ViewportWidth = targetW;
+            profile.ViewportHeight = targetH;
+        }
 
         try
         {
@@ -239,7 +245,7 @@ internal static class OrientationHelper
         }
         catch
         {
-            // CDP может быть недоступен — viewport достаточно
+            // CDP недоступен в WebKit — достаточно viewport.
         }
 
         await HumanBehavior.DelayAsync(800, 1200, cancellationToken);
