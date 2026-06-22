@@ -234,6 +234,15 @@ internal static class SlitherGamePlayHelper
                 await HandleStickyAdAsync(context, page, sessionId, reporter, cancellationToken, force: true);
                 adShown = true;
             }
+            else if (await YandexUiHelper.IsFullscreenAdVisibleForInteractionAsync(page))
+            {
+                await LogAsync(sessionId, reporter,
+                    "Боковой баннер не виден — взаимодействуем с полноэкранной рекламой (приоритет высокого CPC)…",
+                    cancellationToken);
+                await YandexUiHelper.InteractWithFullscreenAdIfVisibleAsync(
+                    page, sessionId, reporter, cancellationToken);
+                adShown = true;
+            }
             else
             {
                 await LogAsync(sessionId, reporter, "Боковая реклама не видна — пропускаем", cancellationToken);
@@ -349,7 +358,13 @@ internal static class SlitherGamePlayHelper
         if (!await IsStickyAdVisibleAsync(gamePage))
             return;
 
-        await LogAsync(sessionId, reporter, "Боковая реклама — клик и просмотр (не менее 30 сек)…", cancellationToken);
+        var stickyProbe = await HighCpcAdClassifier.ProbeStickyAdTextAsync(gamePage);
+        var stickyCategory = HighCpcAdClassifier.Classify(stickyProbe);
+        await LogAsync(sessionId, reporter,
+            stickyCategory == HighCpcAdClassifier.HighCpcCategory.Unknown
+                ? "Боковая реклама — категория не определена, кликаем доступный баннер…"
+                : $"Боковая реклама — {HighCpcAdClassifier.Describe(stickyCategory)}, клик и просмотр (не менее 30 сек)…",
+            cancellationToken);
 
         var adLocator = await FindStickyAdLocatorAsync(gamePage);
         if (adLocator is null)
@@ -393,6 +408,7 @@ internal static class SlitherGamePlayHelper
         {
             try
             {
+                await LogAdPageCategoryAsync(adPage, sessionId, reporter, cancellationToken);
                 await InteractWithAdPageAsync(adPage, cancellationToken);
             }
             finally
@@ -402,6 +418,7 @@ internal static class SlitherGamePlayHelper
         }
         else if (!gamePage.Url.Equals(urlBefore, StringComparison.OrdinalIgnoreCase))
         {
+            await LogAdPageCategoryAsync(gamePage, sessionId, reporter, cancellationToken);
             await InteractWithAdPageAsync(gamePage, cancellationToken);
             try
             {
@@ -432,6 +449,18 @@ internal static class SlitherGamePlayHelper
             await TryClickInGameMenuPlayAsync(gamePage, cancellationToken);
             await HumanBehavior.DelayAsync(1500, 2500, cancellationToken);
         }
+    }
+
+    private static async Task LogAdPageCategoryAsync(
+        IPage adPage,
+        string sessionId,
+        ISessionEventReporter reporter,
+        CancellationToken cancellationToken)
+    {
+        var category = await HighCpcAdClassifier.ClassifyPageAsync(adPage);
+        await LogAsync(sessionId, reporter,
+            $"Страница рекламодателя: {HighCpcAdClassifier.Describe(category)} · {adPage.Url}",
+            cancellationToken);
     }
 
     private const int MinAdPageSeconds = 30;
@@ -486,7 +515,7 @@ internal static class SlitherGamePlayHelper
 
                     if (linkClicks < 6 && (ticks % 2 == 0 || Random.Next(3) == 0))
                     {
-                        if (await TryClickRandomLinkAsync(adPage, cancellationToken))
+                        if (await TryClickBestCpcLinkAsync(adPage, cancellationToken))
                         {
                             linkClicks++;
                             await adPage.WaitForLoadStateAsync(LoadState.DOMContentLoaded,
@@ -604,27 +633,11 @@ internal static class SlitherGamePlayHelper
         }
     }
 
-    private static async Task<bool> TryClickRandomLinkAsync(IPage page, CancellationToken cancellationToken)
+    private static async Task<bool> TryClickBestCpcLinkAsync(IPage page, CancellationToken cancellationToken)
     {
         try
         {
-            var href = await page.EvaluateAsync<string?>(
-                """
-                () => {
-                  const current = location.href.split('#')[0];
-                  const links = [...document.querySelectorAll('a[href]')]
-                    .filter(a => {
-                      const h = a.href;
-                      if (!h || h.startsWith('javascript:') || h.startsWith('mailto:')) return false;
-                      if (h.split('#')[0] === current) return false;
-                      const r = a.getBoundingClientRect();
-                      return r.width > 30 && r.height > 12 && r.top >= 0 && r.top < innerHeight;
-                    });
-                  if (!links.length) return null;
-                  const pick = links[Math.floor(Math.random() * Math.min(links.length, 12))];
-                  return pick.href;
-                }
-                """);
+            var href = await HighCpcAdClassifier.PickBestLinkHrefAsync(page);
 
             if (string.IsNullOrWhiteSpace(href))
                 return false;

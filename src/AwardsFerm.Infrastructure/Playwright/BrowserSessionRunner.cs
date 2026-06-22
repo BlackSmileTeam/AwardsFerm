@@ -84,7 +84,8 @@ public sealed class BrowserSessionRunner : IBrowserSessionRunner
                     profile,
                     _profilesRoot,
                     useProxy,
-                    options.ProxyUrl);
+                    options.ProxyUrl,
+                    options.DevicePlatform);
                 if (useProxy && sessionProfile.ProxyUrl is null)
                 {
                     await ReportLogAsync(

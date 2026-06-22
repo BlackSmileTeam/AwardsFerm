@@ -14,6 +14,7 @@ public sealed class SessionSlotDefinition
     public bool AutoRestart { get; set; } = true;
     public bool ProxyEnabled { get; set; } = true;
     public long? ProxyId { get; set; }
+    public SessionDevicePlatform DevicePlatform { get; set; } = SessionDevicePlatform.Random;
 }
 
 public sealed class SessionSlotsConfig
@@ -30,6 +31,7 @@ public sealed class UpdateSessionSlotRequest
     public bool? AutoRestart { get; set; }
     public bool? ProxyEnabled { get; set; }
     public long? ProxyId { get; set; }
+    public SessionDevicePlatform? DevicePlatform { get; set; }
 }
 
 public sealed class CreateSessionSlotRequest

@@ -3,6 +3,7 @@ import type {
   CreateAdAccountRequest,
   CreateProxyRequest,
   ProxyConfig,
+  SessionDevicePlatform,
   SessionEvent,
   SessionInfo,
   SessionSlotConfig,
@@ -130,6 +131,7 @@ export async function startSession(
     stopAtMsk?: string | null
     autoRestart?: boolean
     proxyEnabled?: boolean
+    devicePlatform?: SessionDevicePlatform
   },
 ): Promise<SessionInfo> {
   const gameUrlPart = extractGameUrlPart(options.gameUrl)
@@ -150,6 +152,7 @@ export async function startSession(
         playDurationMaxSeconds: 180,
         headless: false,
         useProxy: options.proxyEnabled ?? true,
+        devicePlatform: options.devicePlatform ?? 'Random',
       },
     }),
   })
@@ -267,7 +270,7 @@ export async function updateSlot(
   adAccountId: number,
   profileId: string,
   patch: Partial<
-    Pick<SessionSlotConfig, 'label' | 'scheduleEnabled' | 'scheduledStartMsk' | 'stopAtMsk' | 'autoRestart' | 'proxyEnabled' | 'proxyId'>
+    Pick<SessionSlotConfig, 'label' | 'scheduleEnabled' | 'scheduledStartMsk' | 'stopAtMsk' | 'autoRestart' | 'proxyEnabled' | 'proxyId' | 'devicePlatform'>
   >,
 ): Promise<SessionSlotConfig> {
   const res = await apiFetch(`/api/slots/${profileId}?adAccountId=${adAccountId}`, {

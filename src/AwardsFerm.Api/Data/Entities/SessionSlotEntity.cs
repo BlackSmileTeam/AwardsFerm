@@ -15,6 +15,7 @@ public sealed class SessionSlotEntity
     public bool ProxyEnabled { get; set; } = true;
     public long? ProxyId { get; set; }
     public ProxyEntity? Proxy { get; set; }
+    public string DevicePlatform { get; set; } = "Random";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public List<SessionRunEntity> Runs { get; set; } = [];

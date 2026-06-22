@@ -15,4 +15,7 @@ public sealed class YandexGamesSearchOptions
 
     /// <summary>Конкретный прокси URL (http://user:pass@host:port). Если задан — rotator не используется.</summary>
     public string? ProxyUrl { get; set; }
+
+    /// <summary>Тип устройства: ПК, ноутбук, планшет, Android/iPhone или случайный.</summary>
+    public SessionDevicePlatform DevicePlatform { get; set; } = SessionDevicePlatform.Random;
 }

@@ -241,6 +241,11 @@ namespace AwardsFerm.Api.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("DevicePlatform")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Label")
                         .IsRequired()
                         .HasMaxLength(128)

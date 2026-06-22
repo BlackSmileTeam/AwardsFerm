@@ -51,6 +51,23 @@ export interface SessionEvent {
   timestamp: string
 }
 
+export type SessionDevicePlatform =
+  | 'Random'
+  | 'Desktop'
+  | 'Laptop'
+  | 'Tablet'
+  | 'AndroidPhone'
+  | 'IPhone'
+
+export const DEVICE_PLATFORM_OPTIONS: { value: SessionDevicePlatform; label: string }[] = [
+  { value: 'Random', label: 'Случайно' },
+  { value: 'Desktop', label: 'ПК' },
+  { value: 'Laptop', label: 'Ноутбук' },
+  { value: 'Tablet', label: 'Планшет' },
+  { value: 'AndroidPhone', label: 'Android смартфон' },
+  { value: 'IPhone', label: 'Apple смартфон' },
+]
+
 export interface SessionSlotConfig {
   id?: number
   adAccountId?: number
@@ -62,6 +79,7 @@ export interface SessionSlotConfig {
   autoRestart?: boolean
   proxyEnabled?: boolean
   proxyId?: number | null
+  devicePlatform?: SessionDevicePlatform
 }
 
 export interface SlotState {

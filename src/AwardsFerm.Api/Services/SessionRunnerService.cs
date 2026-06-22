@@ -205,6 +205,7 @@ public sealed class SessionRunnerService
         request.AutoRestart ??= slot.AutoRestart;
         request.Options ??= new YandexGamesSearchOptions { Headless = false };
         request.Options.UseProxy = slot.ProxyEnabled;
+        request.Options.DevicePlatform = slot.DevicePlatform;
 
         if (!slot.ProxyEnabled)
         {

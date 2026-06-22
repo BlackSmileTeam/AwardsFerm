@@ -43,7 +43,8 @@ public sealed class SessionSlotStore
                 StopAtMsk = x.StopAtMsk,
                 AutoRestart = x.AutoRestart,
                 ProxyEnabled = x.ProxyEnabled,
-                ProxyId = x.ProxyId
+                ProxyId = x.ProxyId,
+                DevicePlatform = ParseDevicePlatform(x.DevicePlatform)
             })
             .ToList();
     }
@@ -86,7 +87,8 @@ public sealed class SessionSlotStore
             StopAtMsk = slot.StopAtMsk,
             AutoRestart = slot.AutoRestart,
             ProxyEnabled = slot.ProxyEnabled,
-            ProxyId = slot.ProxyId
+            ProxyId = slot.ProxyId,
+            DevicePlatform = ParseDevicePlatform(slot.DevicePlatform)
         };
     }
 
@@ -124,6 +126,9 @@ public sealed class SessionSlotStore
         else if (request.ProxyEnabled == false)
             slot.ProxyId = null;
 
+        if (request.DevicePlatform.HasValue)
+            slot.DevicePlatform = request.DevicePlatform.Value.ToString();
+
         db.SaveChanges();
 
         return new SessionSlotDefinition
@@ -137,7 +142,8 @@ public sealed class SessionSlotStore
             StopAtMsk = slot.StopAtMsk,
             AutoRestart = slot.AutoRestart,
             ProxyEnabled = slot.ProxyEnabled,
-            ProxyId = slot.ProxyId
+            ProxyId = slot.ProxyId,
+            DevicePlatform = ParseDevicePlatform(slot.DevicePlatform)
         };
     }
 
@@ -249,6 +255,11 @@ public sealed class SessionSlotStore
 
         return $"{hours:D2}:{minutes:D2}";
     }
+
+    private static SessionDevicePlatform ParseDevicePlatform(string? value) =>
+        Enum.TryParse<SessionDevicePlatform>(value, true, out var parsed)
+            ? parsed
+            : SessionDevicePlatform.Random;
 
     private static SessionSlotDefinition Clone(SessionSlotDefinition source) => source;
 }

@@ -23,8 +23,10 @@ import {
 } from '../api'
 import {
   createEmptySlotState,
+  DEVICE_PLATFORM_OPTIONS,
   type AdAccount,
   type ProxyConfig,
+  type SessionDevicePlatform,
   type SessionEvent,
   type SessionSlotConfig,
   type SessionStatus,
@@ -362,6 +364,7 @@ export function SessionsPanel() {
         stopAtMsk: slot?.stopAtMsk,
         autoRestart: slot?.autoRestart ?? true,
         proxyEnabled: slot?.proxyEnabled ?? true,
+        devicePlatform: slot?.devicePlatform ?? 'Random',
       })
       sessionIdToProfile.current[session.id] = profileId
       setSlots((prev) => ({
@@ -546,7 +549,7 @@ export function SessionsPanel() {
 
   const onSlotChange = async (
     profileId: string,
-    patch: Partial<Pick<SessionSlotConfig, 'label' | 'scheduleEnabled' | 'scheduledStartMsk' | 'stopAtMsk' | 'autoRestart' | 'proxyEnabled' | 'proxyId'>>,
+    patch: Partial<Pick<SessionSlotConfig, 'label' | 'scheduleEnabled' | 'scheduledStartMsk' | 'stopAtMsk' | 'autoRestart' | 'proxyEnabled' | 'proxyId' | 'devicePlatform'>>,
   ) => {
     if (!selectedAccountId) return
     try {
@@ -735,7 +738,7 @@ function SessionCard({
   onResume: () => void
   onDelete: () => void
   onSlotChange: (
-    patch: Partial<Pick<SessionSlotConfig, 'scheduleEnabled' | 'scheduledStartMsk' | 'stopAtMsk' | 'autoRestart' | 'proxyEnabled' | 'proxyId'>>,
+    patch: Partial<Pick<SessionSlotConfig, 'scheduleEnabled' | 'scheduledStartMsk' | 'stopAtMsk' | 'autoRestart' | 'proxyEnabled' | 'proxyId' | 'devicePlatform'>>,
   ) => void
   onPreviewClose: () => void
   onScreenshotUpdate: (base64: string | null) => void
@@ -1035,6 +1038,25 @@ function SessionCard({
             ) : null}
           </div>
         </div>
+      </div>
+
+      <div className="schedule-row">
+        <label className="schedule-label proxy-select-label">
+          Устройство
+          <select
+            className="proxy-select"
+            value={config.devicePlatform ?? 'Random'}
+            onChange={(e) =>
+              onSlotChange({ devicePlatform: e.target.value as SessionDevicePlatform })
+            }
+          >
+            {DEVICE_PLATFORM_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className="schedule-row">

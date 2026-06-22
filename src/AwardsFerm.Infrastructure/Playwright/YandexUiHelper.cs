@@ -728,6 +728,9 @@ internal static class YandexUiHelper
         return false;
     }
 
+    public static async Task<bool> IsFullscreenAdVisibleForInteractionAsync(IPage page)
+        => await IsFullscreenAdVisibleAsync(page);
+
     public static async Task DismissFullscreenAdIfVisibleAsync(
         IPage page,
         CancellationToken cancellationToken = default)
@@ -736,22 +739,103 @@ internal static class YandexUiHelper
             await DismissFullscreenAdAsync(page, cancellationToken);
     }
 
-    /// <summary>Открывает полноэкранную рекламу (клик по контенту), проводит на странице ≥30 сек, затем закрывает.</summary>
+    /// <summary>Открывает полноэкранную рекламу (клик по контенту с приоритетом высокого CPC), проводит на странице ≥30 сек, затем закрывает.</summary>
     public static async Task InteractWithFullscreenAdIfVisibleAsync(
         IPage page,
+        string? sessionId = null,
+        ISessionEventReporter? reporter = null,
         CancellationToken cancellationToken = default)
     {
         if (!await IsFullscreenAdVisibleAsync(page))
             return;
 
+        var probe = await ProbeFullscreenAdTextAsync(page);
+        var category = HighCpcAdClassifier.Classify(probe);
+        if (sessionId is not null && reporter is not null)
+        {
+            await reporter.ReportAsync(new SessionEvent
+            {
+                SessionId = sessionId,
+                Type = SessionEventType.Log,
+                Message = category == HighCpcAdClassifier.HighCpcCategory.Unknown
+                    ? "Полноэкранная реклама — категория не определена, кликаем доступный креатив…"
+                    : $"Полноэкранная реклама — {HighCpcAdClassifier.Describe(category)}"
+            }, cancellationToken);
+        }
+
         await TryOpenFullscreenAdContentAsync(page, cancellationToken);
         await HumanBehavior.DelayAsync(2000, 4000, cancellationToken);
+
+        if (!page.Url.Contains("yandex.ru/games", StringComparison.OrdinalIgnoreCase))
+        {
+            var pageCategory = await HighCpcAdClassifier.ClassifyPageAsync(page);
+            if (sessionId is not null && reporter is not null)
+            {
+                await reporter.ReportAsync(new SessionEvent
+                {
+                    SessionId = sessionId,
+                    Type = SessionEventType.Log,
+                    Message = $"Страница рекламодателя (fullscreen): {HighCpcAdClassifier.Describe(pageCategory)} · {page.Url}"
+                }, cancellationToken);
+            }
+        }
+
         await BrowsePageBrieflyAsync(page, 30, cancellationToken);
         await DismissFullscreenAdAsync(page, cancellationToken);
     }
 
+    private static async Task<string?> ProbeFullscreenAdTextAsync(IPage page)
+    {
+        try
+        {
+            return await page.EvaluateAsync<string?>(
+                """
+                () => {
+                  const parts = [];
+                  const roots = document.querySelectorAll(
+                    '.play-modal.play-modal_visible, .play-yandex-modal_visible, [data-testid="yandex-fullscreen-render-button"]'
+                  );
+                  for (const el of roots) {
+                    parts.push(el.innerText || '');
+                    for (const img of el.querySelectorAll('img')) {
+                      if (img.alt) parts.push(img.alt);
+                    }
+                    for (const a of el.querySelectorAll('a[href]')) {
+                      parts.push(a.href, a.innerText || '');
+                    }
+                  }
+                  const text = parts.join(' ').trim();
+                  return text.length ? text : null;
+                }
+                """);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static async Task TryOpenFullscreenAdContentAsync(IPage page, CancellationToken cancellationToken)
     {
+        var bestSelector = await HighCpcAdClassifier.PickBestFullscreenAdSelectorAsync(page);
+        if (!string.IsNullOrWhiteSpace(bestSelector))
+        {
+            try
+            {
+                var target = page.Locator(bestSelector).First;
+                if (await target.CountAsync() > 0 && await target.IsVisibleAsync())
+                {
+                    await HumanBehavior.MoveAndClickAsync(page, target, cancellationToken);
+                    await HumanBehavior.DelayAsync(1500, 3000, cancellationToken);
+                    return;
+                }
+            }
+            catch
+            {
+                // fallback below
+            }
+        }
+
         var contentSelectors = new[]
         {
             "[data-testid='yandex-fullscreen-render-button']",

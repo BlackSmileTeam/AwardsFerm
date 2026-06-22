@@ -51,6 +51,7 @@ public sealed class PlaywrightBrowserFactory
 
         var windowPosition = ResolveWindowPosition(profile.Id);
         var isMobileLike = profile.FormFactor != DeviceFormFactor.Desktop;
+        var useWebKit = profile.BrowserEngine == BrowserEngine.WebKit;
         var viewport = new ViewportSize { Width = profile.ViewportWidth, Height = profile.ViewportHeight };
 
         var isLinux = OperatingSystem.IsLinux();
@@ -71,11 +72,12 @@ public sealed class PlaywrightBrowserFactory
             Permissions = ["geolocation"],
             ColorScheme = ColorScheme.Light,
             DeviceScaleFactor = (float)profile.DeviceScaleFactor,
-            // CDP mobile=true на десктопном Chrome вызывает скачки масштаба; layout задаёт UA + viewport + touch.
-            IsMobile = false,
+            IsMobile = useWebKit && isMobileLike,
             HasTouch = isMobileLike,
             SlowMo = isLinux ? 0 : 50,
-            Args = BuildChromeArgs(profile, windowPosition, isLinux),
+            Args = useWebKit
+                ? BuildWebKitArgs(profile)
+                : BuildChromeArgs(profile, windowPosition, isLinux),
             Timeout = 120_000,
             ExtraHTTPHeaders = new Dictionary<string, string>
             {
@@ -110,7 +112,11 @@ public sealed class PlaywrightBrowserFactory
         }
 
         IBrowserContext context;
-        if (!isLinux)
+        if (useWebKit)
+        {
+            context = await playwright.Webkit.LaunchPersistentContextAsync(userDataDir, launchOptions);
+        }
+        else if (!isLinux)
         {
             try
             {
@@ -154,6 +160,9 @@ public sealed class PlaywrightBrowserFactory
         return string.IsNullOrWhiteSpace(display);
     }
 
+    private static string[] BuildWebKitArgs(DesktopProfile profile) =>
+        [$"--lang={profile.Locale}"];
+
     private static string[] BuildChromeArgs(DesktopProfile profile, (int X, int Y) windowPosition, bool isLinux)
     {
         var common = new List<string>
@@ -190,7 +199,7 @@ public sealed class PlaywrightBrowserFactory
 
     private static async Task StabilizeViewportAsync(IBrowserContext context, IPage page, DesktopProfile profile)
     {
-        if (profile.FormFactor == DeviceFormFactor.Desktop)
+        if (profile.FormFactor == DeviceFormFactor.Desktop || profile.BrowserEngine == BrowserEngine.WebKit)
             return;
 
         try

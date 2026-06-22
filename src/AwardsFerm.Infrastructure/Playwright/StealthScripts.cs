@@ -11,12 +11,16 @@ internal static class StealthScripts
         var platform = EscapeJs(profile.Platform);
         var locale = EscapeJs(profile.Locale);
 
+        var isChromium = profile.BrowserEngine == BrowserEngine.Chromium;
+
         return $$"""
             Object.defineProperty(navigator, 'webdriver', { get: () => false });
 
+            {{(isChromium ? """
             if (!window.chrome) {
                 window.chrome = { runtime: {} };
             }
+            """ : "")}}
 
             Object.defineProperty(navigator, 'languages', {
                 get: () => ['{{locale}}', 'ru', 'en-US', 'en'],
