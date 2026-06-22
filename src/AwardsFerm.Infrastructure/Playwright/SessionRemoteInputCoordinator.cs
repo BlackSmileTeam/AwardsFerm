@@ -239,7 +239,8 @@ public sealed class SessionRemoteInputCoordinator
             return null;
 
         var gate = _locks.GetOrAdd(profileId, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken);
+        if (!await gate.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken))
+            return null;
         try
         {
             IPage? page;

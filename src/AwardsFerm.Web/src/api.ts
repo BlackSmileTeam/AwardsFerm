@@ -215,6 +215,7 @@ export async function setPreviewByProfile(profileId: string, enabled: boolean): 
 export async function fetchPreviewFrame(profileId: string): Promise<string | null> {
   const res = await apiFetch(
     `/api/sessions/profile/${encodeURIComponent(profileId)}/preview/frame`,
+    { signal: AbortSignal.timeout(10_000) },
   )
   if (res.status === 204) return null
   if (!res.ok) return null

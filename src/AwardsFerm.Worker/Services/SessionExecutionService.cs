@@ -143,44 +143,39 @@ public sealed class SessionExecutionService
         _logger.LogInformation("Profile {ProfileId}: продолжение", profileId);
     }
 
-    public async Task SetPreviewAsync(string profileId, bool enabled, CancellationToken cancellationToken = default)
+    public Task SetPreviewAsync(string profileId, bool enabled, CancellationToken cancellationToken = default)
     {
         _previewCoordinator.SetEnabled(profileId, enabled);
         if (enabled)
         {
             _previewCoordinator.RequestImmediateCapture(profileId);
-            try
-            {
-                var frame = await _remoteInput.TryCaptureFrameAsync(profileId, cancellationToken);
-                if (!string.IsNullOrWhiteSpace(frame))
-                    _previewCoordinator.SetLastFrame(profileId, frame);
-            }
-            catch
-            {
-                // streaming loop подхватит кадр
-            }
+            _ = CaptureInitialPreviewFrameAsync(profileId);
         }
 
         _logger.LogInformation("Profile {ProfileId}: просмотр {State}", profileId, enabled ? "вкл" : "выкл");
+        return Task.CompletedTask;
     }
 
-    public async Task<string?> GetPreviewFrameAsync(
-        string profileId,
-        CancellationToken cancellationToken = default)
+    private async Task CaptureInitialPreviewFrameAsync(string profileId)
     {
-        var cached = _previewCoordinator.GetLastFrame(profileId);
-        if (!string.IsNullOrWhiteSpace(cached))
-            return cached;
-
-        if (!_previewCoordinator.IsEnabled(profileId))
-            return null;
-
-        var frame = await _remoteInput.TryCaptureFrameAsync(profileId, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(frame))
-            _previewCoordinator.SetLastFrame(profileId, frame);
-
-        return frame;
+        try
+        {
+            await Task.Delay(100);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var frame = await _remoteInput.TryCaptureFrameAsync(profileId, cts.Token);
+            if (!string.IsNullOrWhiteSpace(frame))
+                _previewCoordinator.SetLastFrame(profileId, frame);
+        }
+        catch
+        {
+            // streaming loop подхватит кадр
+        }
     }
+
+    public Task<string?> GetPreviewFrameAsync(
+        string profileId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(_previewCoordinator.GetLastFrame(profileId));
 
     public string? GetPreviewFrame(string profileId) => _previewCoordinator.GetLastFrame(profileId);
 

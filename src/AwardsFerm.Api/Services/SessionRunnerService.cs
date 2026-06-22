@@ -254,10 +254,13 @@ public sealed class SessionRunnerService
 
         try
         {
-            var client = _httpClientFactory.CreateClient("worker");
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+
+            var client = _httpClientFactory.CreateClient("worker-quick");
             var response = await client.GetAsync(
                 $"{GetWorkerBaseUrl()}/internal/preview/{profileId}/frame",
-                cancellationToken);
+                timeoutCts.Token);
             if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
                 return null;
             if (!response.IsSuccessStatusCode)
