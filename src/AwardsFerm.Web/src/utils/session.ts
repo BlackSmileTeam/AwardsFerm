@@ -88,7 +88,7 @@ export function statusCssClass(status: unknown): string {
 }
 
 const CAPTCHA_PENDING_RE =
-  /обнаружена капча|smartcaptcha|ads-captcha|решается только вручную|автоклик не помог|showcaptcha|капча «я не робот»/i
+  /обнаружена капча|smartcaptcha|ads-captcha|captcha verification|решается только вручную|автоклик не помог|showcaptcha|капча «я не робот»|все действия остановлены|пауза — captcha/i
 const CAPTCHA_RESOLVED_RE =
   /капча пройдена|галочка нажата|продолжаем сценарий/i
 const PROGRESS_AFTER_CAPTCHA_RE =

@@ -1181,7 +1181,7 @@ function SessionCard({
 
       {captchaPending && !previewOpen && isOccupied && (
         <div className="captcha-banner">
-          Обнаружена SmartCaptcha — откройте «Просмотр», «На весь экран» и пройдите проверку вручную
+          Обнаружена Captcha Verification — все действия остановлены. Откройте «Просмотр», «На весь экран» и пройдите проверку вручную
         </div>
       )}
 

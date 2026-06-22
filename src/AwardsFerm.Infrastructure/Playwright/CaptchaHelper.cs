@@ -138,7 +138,9 @@ internal static class CaptchaHelper
         }
 
         var url = page.Url;
-        if (url.Contains("ads-captcha.yandex.", StringComparison.OrdinalIgnoreCase))
+        if (url.Contains("ads-captcha.yandex.", StringComparison.OrdinalIgnoreCase) ||
+            url.Contains("showcaptcha", StringComparison.OrdinalIgnoreCase) ||
+            url.Contains("checkcaptcha", StringComparison.OrdinalIgnoreCase))
             return true;
 
         try
@@ -450,7 +452,11 @@ internal static class CaptchaHelper
         string? profileId = null,
         ISessionPauseCoordinator? pauseCoordinator = null)
     {
-        var deadline = DateTimeOffset.UtcNow.AddMinutes(maxWaitMinutes);
+        var hasCoordinator = manualOnly && pauseCoordinator is not null && !string.IsNullOrWhiteSpace(profileId);
+        var deadline = hasCoordinator
+            ? DateTimeOffset.MaxValue
+            : DateTimeOffset.UtcNow.AddMinutes(maxWaitMinutes);
+
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -460,6 +466,12 @@ internal static class CaptchaHelper
 
             if (!await IsPresentInScopeAsync(page, context))
             {
+                if (pauseCoordinator is not null && !string.IsNullOrWhiteSpace(profileId) &&
+                    pauseCoordinator.IsPaused(profileId))
+                {
+                    pauseCoordinator.Resume(profileId);
+                }
+
                 await reporter.ReportAsync(new SessionEvent
                 {
                     SessionId = sessionId,
@@ -482,11 +494,39 @@ internal static class CaptchaHelper
                 return;
             }
 
-            await Task.Delay(2000, cancellationToken);
+            await Task.Delay(1000, cancellationToken);
         }
+
+        if (hasCoordinator)
+            return;
 
         throw new InvalidOperationException(
             $"Капча не решена за {maxWaitMinutes} мин. Откройте «Просмотр», пройдите капчу и запустите сессию снова.");
+    }
+
+    /// <summary>Останавливает текущий сценарий, пока в контексте открыта Captcha Verification.</summary>
+    public static async Task BlockWhileCaptchaOpenAsync(
+        IBrowserContext context,
+        IPage page,
+        string profileId,
+        string sessionId,
+        ISessionEventReporter reporter,
+        ISessionPauseCoordinator pauseCoordinator,
+        ActivePageHolder? activePage,
+        CancellationToken cancellationToken)
+    {
+        await pauseCoordinator.WaitIfPausedAsync(profileId, sessionId, reporter, cancellationToken);
+
+        if (!await IsPresentInContextAsync(context))
+            return;
+
+        await WaitForManualSolveAsync(
+            page, sessionId, reporter, cancellationToken,
+            maxWaitMinutes: 120,
+            context: context,
+            profileId: profileId,
+            pauseCoordinator: pauseCoordinator,
+            activePage: activePage);
     }
 
     private static bool IsCaptchaUrl(string? url)

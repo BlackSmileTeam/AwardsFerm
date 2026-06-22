@@ -231,7 +231,8 @@ internal static class SlitherGamePlayHelper
 
             if (await IsStickyAdVisibleAsync(page))
             {
-                await HandleStickyAdAsync(context, page, sessionId, reporter, cancellationToken, force: true);
+                await HandleStickyAdAsync(
+                    context, page, profileId, sessionId, reporter, pauseCoordinator, activePage, cancellationToken, force: true);
                 adShown = true;
             }
             else if (await YandexUiHelper.IsFullscreenAdVisibleForInteractionAsync(page))
@@ -298,12 +299,10 @@ internal static class SlitherGamePlayHelper
             if (page.IsClosed)
                 return false;
 
-            if (++checks % 8 == 0)
+            if (++checks % 3 == 0)
             {
-                if (await CaptchaHelper.IsPresentInContextAsync(context))
-                    await CaptchaHelper.WaitForManualSolveAsync(
-                        page, sessionId, reporter, cancellationToken,
-                        context: context, profileId: profileId, pauseCoordinator: pauseCoordinator, activePage: activePage);
+                await CaptchaHelper.BlockWhileCaptchaOpenAsync(
+                    context, page, profileId, sessionId, reporter, pauseCoordinator, activePage, cancellationToken);
 
                 if (await IsGameOverVisibleAsync(page))
                     return true;
@@ -350,11 +349,18 @@ internal static class SlitherGamePlayHelper
     private static async Task HandleStickyAdAsync(
         IBrowserContext context,
         IPage gamePage,
+        string profileId,
         string sessionId,
         ISessionEventReporter reporter,
+        ISessionPauseCoordinator pauseCoordinator,
+        ActivePageHolder? activePage,
         CancellationToken cancellationToken,
         bool force = false)
     {
+        await pauseCoordinator.WaitIfPausedAsync(profileId, sessionId, reporter, cancellationToken);
+        await CaptchaHelper.BlockWhileCaptchaOpenAsync(
+            context, gamePage, profileId, sessionId, reporter, pauseCoordinator, activePage, cancellationToken);
+
         if (!await IsStickyAdVisibleAsync(gamePage))
             return;
 
@@ -409,7 +415,8 @@ internal static class SlitherGamePlayHelper
             try
             {
                 await LogAdPageCategoryAsync(adPage, sessionId, reporter, cancellationToken);
-                await InteractWithAdPageAsync(adPage, cancellationToken);
+                await InteractWithAdPageAsync(
+                    adPage, context, profileId, sessionId, reporter, pauseCoordinator, activePage, cancellationToken);
             }
             finally
             {
@@ -419,7 +426,8 @@ internal static class SlitherGamePlayHelper
         else if (!gamePage.Url.Equals(urlBefore, StringComparison.OrdinalIgnoreCase))
         {
             await LogAdPageCategoryAsync(gamePage, sessionId, reporter, cancellationToken);
-            await InteractWithAdPageAsync(gamePage, cancellationToken);
+            await InteractWithAdPageAsync(
+                gamePage, context, profileId, sessionId, reporter, pauseCoordinator, activePage, cancellationToken);
             try
             {
                 await gamePage.GoBackAsync(new PageGoBackOptions { Timeout = 15_000 });
@@ -465,7 +473,15 @@ internal static class SlitherGamePlayHelper
 
     private const int MinAdPageSeconds = 30;
 
-    private static async Task InteractWithAdPageAsync(IPage adPage, CancellationToken cancellationToken)
+    private static async Task InteractWithAdPageAsync(
+        IPage adPage,
+        IBrowserContext context,
+        string profileId,
+        string sessionId,
+        ISessionEventReporter reporter,
+        ISessionPauseCoordinator pauseCoordinator,
+        ActivePageHolder? activePage,
+        CancellationToken cancellationToken)
     {
         if (adPage.IsClosed)
             return;
@@ -500,6 +516,10 @@ internal static class SlitherGamePlayHelper
                 cancellationToken.ThrowIfCancellationRequested();
                 if (adPage.IsClosed)
                     return;
+
+                await pauseCoordinator.WaitIfPausedAsync(profileId, sessionId, reporter, cancellationToken);
+                await CaptchaHelper.BlockWhileCaptchaOpenAsync(
+                    context, adPage, profileId, sessionId, reporter, pauseCoordinator, activePage, cancellationToken);
 
                 if (alertCount >= 3)
                 {
