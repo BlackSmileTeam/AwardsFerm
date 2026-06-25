@@ -1536,6 +1536,16 @@ function SessionCard({
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id={`settings-title-${config.profileId}`}>Настройки — {config.label}</h3>
+            <div className="schedule-row">
+              <label className="schedule-label">
+                <input
+                  type="checkbox"
+                  checked={config.autoRestart ?? true}
+                  onChange={(e) => onSlotChange({ autoRestart: e.target.checked })}
+                />
+                Автоперезапуск
+              </label>
+            </div>
             <div className="schedule-block">
               <div className="schedule-row">
                 <label className="schedule-label">
@@ -1583,7 +1593,7 @@ function SessionCard({
               </div>
             </div>
             <div className="schedule-row">
-              <label className="schedule-label proxy-select-label">
+              <label className="schedule-label">
                 Устройство
                 <select
                   className="proxy-select"
@@ -1634,14 +1644,6 @@ function SessionCard({
                   </select>
                 </div>
               )}
-              <label className="schedule-label">
-                <input
-                  type="checkbox"
-                  checked={config.autoRestart ?? true}
-                  onChange={(e) => onSlotChange({ autoRestart: e.target.checked })}
-                />
-                Автоперезапуск
-              </label>
             </div>
             <div className="popup-actions">
               <button type="button" className="btn btn-secondary btn-sm" onClick={closeSettingsPopup}>
