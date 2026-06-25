@@ -15,9 +15,10 @@ import {
   pauseSessionByProfile,
   previewClickByProfile,
   previewCloseCaptchaTabByProfile,
-  previewReloadByProfile,
+  previewReloadTabByProfile,
   fetchBrowserTabsByProfile,
   closeBrowserTabByProfile,
+  downloadSessionLog,
   resumeSessionByProfile,
   setPreviewByProfile,
   fetchPreviewFrame,
@@ -629,26 +630,32 @@ export function SessionsPanel() {
       </div>
 
       <div className="account-selector">
-        <label>
-          Рекламный аккаунт
-          <select
-            value={selectedAccountId ?? ''}
-            onChange={(e) => setSelectedAccountId(Number(e.target.value))}
-            disabled={accounts.length === 0}
-          >
-            {accounts.length === 0 ? (
-              <option value="">Нет аккаунтов</option>
-            ) : (
-              accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name} — {a.gameTitle}
-                </option>
-              ))
-            )}
-          </select>
-        </label>
-        <button className="btn btn-secondary btn-sm" onClick={() => void onAddSlot()} disabled={addingSlot || !selectedAccountId || slotConfigs.length >= 10}>
-          + Добавить сессию
+        <select
+          className="account-selector-select"
+          value={selectedAccountId ?? ''}
+          onChange={(e) => setSelectedAccountId(Number(e.target.value))}
+          disabled={accounts.length === 0}
+          aria-label="Рекламный аккаунт"
+        >
+          {accounts.length === 0 ? (
+            <option value="">Нет аккаунтов</option>
+          ) : (
+            accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name} — {a.gameTitle}
+              </option>
+            ))
+          )}
+        </select>
+        <button
+          type="button"
+          className="account-selector-add"
+          onClick={() => void onAddSlot()}
+          disabled={addingSlot || !selectedAccountId || slotConfigs.length >= 10}
+          title="Добавить сессию"
+          aria-label="Добавить сессию"
+        >
+          +
         </button>
       </div>
 
@@ -750,9 +757,11 @@ function SessionCard({
   const menuRef = useRef<HTMLDivElement>(null)
   const screenshotRef = useRef<HTMLImageElement>(null)
   const [copied, setCopied] = useState(false)
+  const [downloaded, setDownloaded] = useState(false)
   const [diagnosticCopied, setDiagnosticCopied] = useState(false)
   const [diagnosticExpanded, setDiagnosticExpanded] = useState(true)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [clickPending, setClickPending] = useState(false)
   const [clickError, setClickError] = useState<string | null>(null)
   const [previewActionPending, setPreviewActionPending] = useState(false)
@@ -762,6 +771,7 @@ function SessionCard({
   const [tabsError, setTabsError] = useState<string | null>(null)
   const [browserTabs, setBrowserTabs] = useState<BrowserTabInfo[]>([])
   const [tabClosePending, setTabClosePending] = useState<number | null>(null)
+  const [tabReloadPending, setTabReloadPending] = useState<number | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewFullscreen, setPreviewFullscreen] = useState(false)
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -955,18 +965,14 @@ function SessionCard({
     }
   }
 
-  const runPreviewAction = async (action: 'reload' | 'closeCaptcha') => {
+  const closeCaptchaTab = async () => {
     if (!isOccupied || previewActionPending) return
 
     setMenuOpen(false)
     setPreviewActionPending(true)
     setPreviewActionError(null)
     try {
-      if (action === 'reload') {
-        await previewReloadByProfile(config.profileId)
-      } else {
-        await previewCloseCaptchaTabByProfile(config.profileId)
-      }
+      await previewCloseCaptchaTabByProfile(config.profileId)
       await refreshPreviewFrame()
     } catch (e) {
       setPreviewActionError(
@@ -1003,6 +1009,32 @@ function SessionCard({
     setTabsError(null)
     setBrowserTabs([])
     setTabClosePending(null)
+    setTabReloadPending(null)
+  }
+
+  const handleReloadTab = async (index: number) => {
+    if (tabReloadPending !== null || tabClosePending !== null) return
+
+    setTabReloadPending(index)
+    setTabsError(null)
+    try {
+      await previewReloadTabByProfile(config.profileId, index)
+      await loadBrowserTabs()
+      await refreshPreviewFrame()
+    } catch (e) {
+      setTabsError(e instanceof Error ? e.message : 'Не удалось обновить вкладку')
+    } finally {
+      setTabReloadPending(null)
+    }
+  }
+
+  const openSettingsPopup = () => {
+    setMenuOpen(false)
+    setSettingsOpen(true)
+  }
+
+  const closeSettingsPopup = () => {
+    setSettingsOpen(false)
   }
 
   const handleCloseTab = async (index: number) => {
@@ -1043,6 +1075,48 @@ function SessionCard({
       }
       setCopied(true)
       window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const buildLogExportText = () => {
+    let text = displayLogs.join('\n')
+    if (displayDiagnosticLogs.length > 0) {
+      text += '\n\n=== Диагностика ===\n\n' + displayDiagnosticLogs.join('\n\n')
+    }
+    return text
+  }
+
+  const downloadLogs = async () => {
+    if (displayLogs.length === 0 && displayDiagnosticLogs.length === 0) return
+
+    const sessionId = state.session?.id
+    const stamp = new Date().toISOString().slice(0, 10)
+    const fileName = sessionId
+      ? `session-${sessionId.slice(0, 8)}-${stamp}.log`
+      : `session-${config.profileId}-${stamp}.log`
+
+    try {
+      let blob: Blob
+      if (sessionId) {
+        try {
+          blob = await downloadSessionLog(sessionId)
+        } catch {
+          blob = new Blob([buildLogExportText()], { type: 'text/plain;charset=utf-8' })
+        }
+      } else {
+        blob = new Blob([buildLogExportText()], { type: 'text/plain;charset=utf-8' })
+      }
+
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = fileName
+      anchor.click()
+      URL.revokeObjectURL(url)
+      setDownloaded(true)
+      window.setTimeout(() => setDownloaded(false), 2000)
     } catch {
       /* ignore */
     }
@@ -1097,116 +1171,6 @@ function SessionCard({
         </div>
       </div>
 
-      <div className="schedule-block">
-        <div className="schedule-row">
-          <label className="schedule-label">
-            <input
-              type="checkbox"
-              checked={config.scheduleEnabled}
-              onChange={(e) =>
-                onSlotChange({
-                  scheduleEnabled: e.target.checked,
-                  scheduledStartMsk: config.scheduledStartMsk ?? '09:00',
-                })
-              }
-            />
-            Автозапуск (МСК)
-          </label>
-          <input
-            type="time"
-            className="schedule-time"
-            value={config.scheduledStartMsk ?? '09:00'}
-            disabled={!config.scheduleEnabled}
-            onChange={(e) => onSlotChange({ scheduledStartMsk: e.target.value })}
-          />
-        </div>
-        <div className="schedule-row schedule-row-stop">
-          <label className="schedule-label schedule-label-inline">Остановить (МСК)</label>
-          <div className="schedule-time-wrap">
-            <input
-              type="time"
-              className="schedule-time"
-              value={config.stopAtMsk ?? ''}
-              onChange={(e) => onSlotChange({ stopAtMsk: e.target.value || null })}
-            />
-            {config.stopAtMsk ? (
-              <button
-                type="button"
-                className="schedule-time-clear"
-                onClick={() => onSlotChange({ stopAtMsk: null })}
-                title="Сбросить время остановки"
-                aria-label="Сбросить время остановки"
-              >
-                ×
-              </button>
-            ) : null}
-          </div>
-        </div>
-      </div>
-
-      <div className="schedule-row">
-        <label className="schedule-label proxy-select-label">
-          Устройство
-          <select
-            className="proxy-select"
-            value={config.devicePlatform ?? 'Random'}
-            onChange={(e) =>
-              onSlotChange({ devicePlatform: e.target.value as SessionDevicePlatform })
-            }
-          >
-            {DEVICE_PLATFORM_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <div className="schedule-row">
-        <label className="schedule-label">
-          <input
-            type="checkbox"
-            checked={config.proxyEnabled ?? true}
-            onChange={(e) =>
-              onSlotChange({
-                proxyEnabled: e.target.checked,
-                proxyId: e.target.checked ? config.proxyId ?? undefined : 0,
-              })
-            }
-          />
-          Прокси
-        </label>
-        {(config.proxyEnabled ?? true) && (
-          <div className="schedule-label proxy-select-label">
-            <select
-              className="proxy-select"
-              value={config.proxyId ?? ''}
-              onChange={(e) =>
-                onSlotChange({
-                  proxyId: e.target.value ? Number(e.target.value) : 0,
-                })
-              }
-            >
-              <option value="">— выберите —</option>
-              {proxies.map((proxy) => (
-                <option key={proxy.id} value={proxy.id}>
-                  {proxy.name} ({proxy.host}:{proxy.port})
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        <label className="schedule-label">
-          <input
-            type="checkbox"
-            checked={config.autoRestart ?? true}
-            onChange={(e) => onSlotChange({ autoRestart: e.target.checked })}
-          />
-          Автоперезапуск
-        </label>
-      </div>
-
       <div className="session-toolbar">
         <button className="btn btn-primary btn-sm" onClick={onStart} disabled={state.loading || isOccupied}>
           ▶ Старт
@@ -1231,6 +1195,14 @@ function SessionCard({
           </button>
           {menuOpen ? (
             <div className="session-menu-dropdown" role="menu">
+              <button
+                type="button"
+                className="session-menu-item"
+                role="menuitem"
+                onClick={openSettingsPopup}
+              >
+                ⚙ Настроить
+              </button>
               {!isPaused ? (
                 <button
                   type="button"
@@ -1261,15 +1233,6 @@ function SessionCard({
                 type="button"
                 className="session-menu-item"
                 role="menuitem"
-                disabled={!isOccupied || previewActionPending}
-                onClick={() => void runPreviewAction('reload')}
-              >
-                ↻ Обновить страницу
-              </button>
-              <button
-                type="button"
-                className="session-menu-item"
-                role="menuitem"
                 disabled={!isOccupied}
                 onClick={openTabsPopup}
               >
@@ -1280,7 +1243,7 @@ function SessionCard({
                 className="session-menu-item"
                 role="menuitem"
                 disabled={!isOccupied || !captchaPending || previewActionPending}
-                onClick={() => void runPreviewAction('closeCaptcha')}
+                onClick={() => void closeCaptchaTab()}
               >
                 ✕ Закрыть вкладку капчи
               </button>
@@ -1419,6 +1382,30 @@ function SessionCard({
         <div className="log-panel-actions">
           <button
             type="button"
+            className={`btn-icon${downloaded ? ' btn-icon-ok' : ''}`}
+            onClick={() => void downloadLogs()}
+            disabled={displayLogs.length === 0 && displayDiagnosticLogs.length === 0}
+            title={downloaded ? 'Скачано' : 'Скачать лог'}
+            aria-label="Скачать лог"
+          >
+            {downloaded ? (
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"
+                />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"
+                />
+              </svg>
+            )}
+          </button>
+          <button
+            type="button"
             className={`btn-icon${copied ? ' btn-icon-ok' : ''}`}
             onClick={() => void copyLogs()}
             disabled={displayLogs.length === 0}
@@ -1540,6 +1527,131 @@ function SessionCard({
         </div>
       )}
 
+      {settingsOpen ? (
+        <div className="popup-overlay" onClick={closeSettingsPopup}>
+          <div
+            className="popup-dialog popup-dialog-wide session-settings-dialog"
+            role="dialog"
+            aria-labelledby={`settings-title-${config.profileId}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id={`settings-title-${config.profileId}`}>Настройки — {config.label}</h3>
+            <div className="schedule-block">
+              <div className="schedule-row">
+                <label className="schedule-label">
+                  <input
+                    type="checkbox"
+                    checked={config.scheduleEnabled}
+                    onChange={(e) =>
+                      onSlotChange({
+                        scheduleEnabled: e.target.checked,
+                        scheduledStartMsk: config.scheduledStartMsk ?? '09:00',
+                      })
+                    }
+                  />
+                  Автозапуск (МСК)
+                </label>
+                <input
+                  type="time"
+                  className="schedule-time"
+                  value={config.scheduledStartMsk ?? '09:00'}
+                  disabled={!config.scheduleEnabled}
+                  onChange={(e) => onSlotChange({ scheduledStartMsk: e.target.value })}
+                />
+              </div>
+              <div className="schedule-row schedule-row-stop">
+                <label className="schedule-label schedule-label-inline">Остановить (МСК)</label>
+                <div className="schedule-time-wrap">
+                  <input
+                    type="time"
+                    className="schedule-time"
+                    value={config.stopAtMsk ?? ''}
+                    onChange={(e) => onSlotChange({ stopAtMsk: e.target.value || null })}
+                  />
+                  {config.stopAtMsk ? (
+                    <button
+                      type="button"
+                      className="schedule-time-clear"
+                      onClick={() => onSlotChange({ stopAtMsk: null })}
+                      title="Сбросить время остановки"
+                      aria-label="Сбросить время остановки"
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+            <div className="schedule-row">
+              <label className="schedule-label proxy-select-label">
+                Устройство
+                <select
+                  className="proxy-select"
+                  value={config.devicePlatform ?? 'Random'}
+                  onChange={(e) =>
+                    onSlotChange({ devicePlatform: e.target.value as SessionDevicePlatform })
+                  }
+                >
+                  {DEVICE_PLATFORM_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="schedule-row">
+              <label className="schedule-label">
+                <input
+                  type="checkbox"
+                  checked={config.proxyEnabled ?? true}
+                  onChange={(e) =>
+                    onSlotChange({
+                      proxyEnabled: e.target.checked,
+                      proxyId: e.target.checked ? config.proxyId ?? undefined : 0,
+                    })
+                  }
+                />
+                Прокси
+              </label>
+              {(config.proxyEnabled ?? true) && (
+                <div className="schedule-label proxy-select-label">
+                  <select
+                    className="proxy-select"
+                    value={config.proxyId ?? ''}
+                    onChange={(e) =>
+                      onSlotChange({
+                        proxyId: e.target.value ? Number(e.target.value) : 0,
+                      })
+                    }
+                  >
+                    <option value="">— выберите —</option>
+                    {proxies.map((proxy) => (
+                      <option key={proxy.id} value={proxy.id}>
+                        {proxy.name} ({proxy.host}:{proxy.port})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <label className="schedule-label">
+                <input
+                  type="checkbox"
+                  checked={config.autoRestart ?? true}
+                  onChange={(e) => onSlotChange({ autoRestart: e.target.checked })}
+                />
+                Автоперезапуск
+              </label>
+            </div>
+            <div className="popup-actions">
+              <button type="button" className="btn btn-secondary btn-sm" onClick={closeSettingsPopup}>
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {tabsOpen ? (
         <div className="popup-overlay" onClick={closeTabsPopup}>
           <div
@@ -1583,16 +1695,28 @@ function SessionCard({
                         {tab.url || 'about:blank'}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      className="browser-tabs-close"
-                      onClick={() => void handleCloseTab(tab.index)}
-                      disabled={tabClosePending !== null}
-                      title="Закрыть вкладку"
-                      aria-label="Закрыть вкладку"
-                    >
-                      {tabClosePending === tab.index ? '…' : '✕'}
-                    </button>
+                    <div className="browser-tabs-item-actions">
+                      <button
+                        type="button"
+                        className="browser-tabs-reload"
+                        onClick={() => void handleReloadTab(tab.index)}
+                        disabled={tabClosePending !== null || tabReloadPending !== null}
+                        title="Обновить вкладку"
+                        aria-label="Обновить вкладку"
+                      >
+                        {tabReloadPending === tab.index ? '…' : '↻'}
+                      </button>
+                      <button
+                        type="button"
+                        className="browser-tabs-close"
+                        onClick={() => void handleCloseTab(tab.index)}
+                        disabled={tabClosePending !== null || tabReloadPending !== null}
+                        title="Закрыть вкладку"
+                        aria-label="Закрыть вкладку"
+                      >
+                        {tabClosePending === tab.index ? '…' : '✕'}
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>

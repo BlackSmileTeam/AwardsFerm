@@ -123,6 +123,15 @@ export async function fetchSessions(): Promise<SessionInfo[]> {
   return data.map(normalizeSession)
 }
 
+export async function downloadSessionLog(sessionId: string): Promise<Blob> {
+  const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/log`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new ApiError(text || 'Не удалось скачать лог', res.status)
+  }
+  return res.blob()
+}
+
 export async function startSession(
   adAccountId: number,
   profileId: string,
@@ -249,6 +258,17 @@ export async function previewReloadByProfile(profileId: string): Promise<void> {
   if (!res.ok) {
     const text = await res.text()
     throw new Error(text || 'Не удалось обновить страницу')
+  }
+}
+
+export async function previewReloadTabByProfile(profileId: string, index: number): Promise<void> {
+  const res = await apiFetch(
+    `/api/sessions/profile/${encodeURIComponent(profileId)}/preview/tabs/${index}/reload`,
+    { method: 'POST' },
+  )
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Не удалось обновить вкладку')
   }
 }
 

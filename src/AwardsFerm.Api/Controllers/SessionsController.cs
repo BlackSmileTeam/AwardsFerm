@@ -59,6 +59,27 @@ public sealed class SessionsController : ControllerBase
         return Ok(session);
     }
 
+    [HttpGet("{sessionId}/log")]
+    public async Task<IActionResult> DownloadLog(string sessionId, CancellationToken cancellationToken)
+    {
+        var userId = GetUserId();
+        var session = _sessionManager.GetById(sessionId);
+        if (session is null) return NotFound();
+        if (session.AdAccountId is null) return NotFound();
+        if (!await _resolver.UserOwnsAccountAsync(userId, session.AdAccountId.Value, cancellationToken))
+            return NotFound();
+
+        var fileName = $"{sessionId}.log";
+        var file = await _runner.GetSessionLogFileAsync(sessionId, cancellationToken);
+        if (file is { Length: > 0 })
+            return File(file, "text/plain; charset=utf-8", fileName);
+
+        if (session.Logs.Count == 0 && session.DiagnosticLogs.Count == 0)
+            return NotFound();
+
+        return File(SessionRunnerService.BuildLogFile(session), "text/plain; charset=utf-8", fileName);
+    }
+
     [HttpPost("start")]
     public async Task<ActionResult<SessionInfo>> Start(
         [FromBody] StartSessionRequest? request,
@@ -256,6 +277,30 @@ public sealed class SessionsController : ControllerBase
         {
             var tabs = await _runner.ListBrowserTabsAsync(profileId, cancellationToken);
             return Ok(tabs);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ex.Message);
+        }
+    }
+
+    [HttpPost("profile/{profileId}/preview/tabs/{index:int}/reload")]
+    public async Task<IActionResult> PreviewReloadTabByProfile(
+        string profileId,
+        int index,
+        CancellationToken cancellationToken)
+    {
+        var userId = GetUserId();
+        var adAccountId = await _resolver.ResolveAdAccountByProfileAsync(userId, profileId, cancellationToken);
+        if (adAccountId is null)
+            return NotFound();
+        if (!await _resolver.UserOwnsAccountAsync(userId, adAccountId.Value, cancellationToken))
+            return Forbid();
+
+        try
+        {
+            await _runner.PreviewReloadTabAsync(profileId, index, cancellationToken);
+            return NoContent();
         }
         catch (InvalidOperationException ex)
         {

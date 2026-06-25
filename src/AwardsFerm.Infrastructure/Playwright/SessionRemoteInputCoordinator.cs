@@ -179,6 +179,36 @@ public sealed class SessionRemoteInputCoordinator
         }
     }
 
+    public async Task ReloadTabByIndexAsync(
+        string profileId,
+        int index,
+        CancellationToken cancellationToken = default)
+    {
+        var holder = RequireHolder(profileId);
+
+        var gate = _locks.GetOrAdd(profileId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var pages = holder.Context.Pages.Where(p => !p.IsClosed).ToList();
+            if (index < 0 || index >= pages.Count)
+                throw new InvalidOperationException("Вкладка не найдена.");
+
+            var target = pages[index];
+            await target.BringToFrontAsync();
+            holder.Page = target;
+            await target.ReloadAsync(new PageReloadOptions
+            {
+                WaitUntil = WaitUntilState.DOMContentLoaded,
+                Timeout = 45_000
+            });
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     public async Task CloseTabByIndexAsync(
         string profileId,
         int index,

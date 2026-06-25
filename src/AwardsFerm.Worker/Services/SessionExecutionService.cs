@@ -211,6 +211,16 @@ public sealed class SessionExecutionService
         _logger.LogDebug("Profile {ProfileId}: закрыта вкладка Captcha Verification", profileId);
     }
 
+    public async Task PreviewReloadTabAsync(
+        string profileId,
+        int index,
+        CancellationToken cancellationToken = default)
+    {
+        await _remoteInput.ReloadTabByIndexAsync(profileId, index, cancellationToken);
+        _previewCoordinator.RequestImmediateCapture(profileId);
+        _logger.LogDebug("Profile {ProfileId}: обновлена вкладка {Index}", profileId, index);
+    }
+
     public async Task<IReadOnlyList<BrowserTabInfo>> ListBrowserTabsAsync(
         string profileId,
         CancellationToken cancellationToken = default)

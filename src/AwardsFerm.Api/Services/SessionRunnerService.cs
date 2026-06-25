@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text;
 using AwardsFerm.Core.Models;
 
 namespace AwardsFerm.Api.Services;
@@ -203,6 +205,28 @@ public sealed class SessionRunnerService
         }
     }
 
+    public async Task PreviewReloadTabAsync(
+        string profileId,
+        int index,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await IsWorkerHealthyAsync(cancellationToken))
+            throw new InvalidOperationException("Worker не запущен.");
+
+        var client = _httpClientFactory.CreateClient("worker");
+        var response = await client.PostAsync(
+            $"{GetWorkerBaseUrl()}/internal/preview/{profileId}/tabs/{index}/reload",
+            null,
+            cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(body) ? "Не удалось обновить вкладку." : body);
+        }
+    }
+
     public async Task<IReadOnlyList<BrowserTabInfo>> ListBrowserTabsAsync(
         string profileId,
         CancellationToken cancellationToken = default)
@@ -274,6 +298,56 @@ public sealed class SessionRunnerService
             _logger.LogDebug(ex, "Не удалось получить кадр просмотра для {ProfileId}", profileId);
             return null;
         }
+    }
+
+    public async Task<byte[]?> GetSessionLogFileAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+            return null;
+
+        if (!await IsWorkerHealthyAsync(cancellationToken))
+            return null;
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient("worker");
+            var response = await client.GetAsync(
+                $"{GetWorkerBaseUrl()}/internal/sessions/{Uri.EscapeDataString(sessionId)}/log",
+                cancellationToken);
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                return null;
+
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Не удалось получить файл лога сессии {SessionId}", sessionId);
+            return null;
+        }
+    }
+
+    public static byte[] BuildLogFile(SessionInfo session)
+    {
+        var builder = new StringBuilder();
+        foreach (var line in session.Logs)
+            builder.AppendLine(line);
+
+        if (session.DiagnosticLogs.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("=== Диагностика ===");
+            builder.AppendLine();
+            for (var i = 0; i < session.DiagnosticLogs.Count; i++)
+            {
+                if (i > 0)
+                    builder.AppendLine();
+                builder.Append(session.DiagnosticLogs[i]);
+            }
+        }
+
+        return Encoding.UTF8.GetBytes(builder.ToString());
     }
 
     private void ApplySlotSettings(StartSessionRequest request)

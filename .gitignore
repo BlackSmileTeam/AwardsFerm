@@ -21,3 +21,5 @@ profiles/proxy.auth.json
 
 src/AwardsFerm.Web/node_modules/
 src/AwardsFerm.Web/dist/
+
+logs/sessions/*.log

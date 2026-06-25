@@ -9,7 +9,13 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddAwardsFermInfrastructure(profilesRoot);
 builder.Services.AddSingleton<SessionExecutionService>();
-builder.Services.AddSingleton<ISessionEventReporter, HttpSessionEventReporter>();
+builder.Services.AddSingleton<HttpSessionEventReporter>();
+builder.Services.AddSingleton<SessionFileEventReporter>();
+builder.Services.AddSingleton<ISessionEventReporter>(sp => new CompositeSessionEventReporter(
+[
+    sp.GetRequiredService<HttpSessionEventReporter>(),
+    sp.GetRequiredService<SessionFileEventReporter>()
+]));
 
 builder.Services.AddHttpClient("api", client =>
 {
@@ -153,6 +159,23 @@ app.MapGet("/internal/preview/{profileId}/tabs", async (
     }
 });
 
+app.MapPost("/internal/preview/{profileId}/tabs/{index:int}/reload", async (
+    string profileId,
+    int index,
+    SessionExecutionService executor,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        await executor.PreviewReloadTabAsync(profileId, index, cancellationToken);
+        return Results.NoContent();
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Conflict(ex.Message);
+    }
+});
+
 app.MapDelete("/internal/preview/{profileId}/tabs/{index:int}", async (
     string profileId,
     int index,
@@ -168,6 +191,18 @@ app.MapDelete("/internal/preview/{profileId}/tabs/{index:int}", async (
     {
         return Results.Conflict(ex.Message);
     }
+});
+
+app.MapGet("/internal/sessions/{sessionId}/log", (string sessionId, IConfiguration configuration) =>
+{
+    if (string.IsNullOrWhiteSpace(sessionId))
+        return Results.BadRequest();
+
+    var path = SessionLogDirectory.GetLogPath(configuration, sessionId);
+    if (!File.Exists(path))
+        return Results.NotFound();
+
+    return Results.File(path, "text/plain; charset=utf-8", Path.GetFileName(path));
 });
 
 app.MapPost("/internal/stop", async (SessionExecutionService executor, CancellationToken cancellationToken) =>

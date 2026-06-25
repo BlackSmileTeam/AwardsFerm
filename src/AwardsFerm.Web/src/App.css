@@ -257,12 +257,6 @@
   white-space: nowrap;
 }
 
-.schedule-row + .schedule-row,
-.schedule-block + .schedule-row {
-  border-bottom: 1px solid #2d3348;
-  margin-bottom: 0.5rem;
-}
-
 .log-panel-actions {
   display: inline-flex;
   align-items: center;
@@ -1215,6 +1209,14 @@
   color: #bdc1c6;
 }
 
+.browser-tabs-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.browser-tabs-reload,
 .browser-tabs-close {
   flex-shrink: 0;
   width: 28px;
@@ -1227,6 +1229,11 @@
   font-size: 0.9rem;
 }
 
+.browser-tabs-reload:hover:not(:disabled) {
+  background: #3c4458;
+  color: #8ab4f8;
+}
+
 .browser-tabs-close:hover:not(:disabled) {
   background: #3c4458;
   color: #f28b82;
@@ -1235,6 +1242,12 @@
 .browser-tabs-close:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.session-settings-dialog .schedule-block {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
 }
 
 /* Login */
@@ -1294,7 +1307,7 @@
 
 .form-field input,
 .form-field select,
-.account-selector select {
+.account-selector-select {
   background: #1e2230;
   border: 1px solid #2d3348;
   border-radius: 8px;
@@ -1353,8 +1366,8 @@
 
 .account-selector {
   display: flex;
-  align-items: flex-end;
-  gap: 0.75rem;
+  align-items: center;
+  gap: 0.5rem;
   flex-wrap: wrap;
   background: #161b26;
   border: 1px solid #2d3348;
@@ -1362,13 +1375,39 @@
   padding: 0.85rem 1rem;
 }
 
-.account-selector label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  font-size: 0.82rem;
-  color: #9aa0a6;
+.account-selector-select {
+  flex: 1;
   min-width: 240px;
+}
+
+.account-selector-add {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 2.375rem;
+  height: 2.375rem;
+  padding: 0;
+  border: 1px solid #2d3348;
+  border-radius: 8px;
+  background: #1e2230;
+  color: #e8eaed;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.account-selector-add:hover:not(:disabled) {
+  color: #fff;
+  border-color: #5f6368;
+  background: #252a38;
+}
+
+.account-selector-add:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 /* Accounts panel */
